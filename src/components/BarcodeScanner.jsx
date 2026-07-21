@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { Ic, D, Modal } from "../lib/utils.jsx";
 
 /**
@@ -16,6 +16,15 @@ const LINEAR_FORMATS = [
   "ean_13", "ean_8", "itf", "upc_a", "upc_e"
 ];
 
+// How often a frame is examined. Running on every animation frame saturates the
+// main thread, which is what made the preview stutter and go black.
+const SCAN_INTERVAL_MS = 90;
+
+// The part of the frame that is examined, matching the on-screen guide box.
+// Searching a smaller area is dramatically faster than a full 720p frame.
+const CROP_W = 0.9;
+const CROP_H = 0.72;
+
 export default function BarcodeInput({ value, onChange, placeholder, autoFocus, style }) {
   const [scanOpen, setScanOpen] = useState(false);
   const [supported, setSupported] = useState(false);
@@ -25,6 +34,13 @@ export default function BarcodeInput({ value, onChange, placeholder, autoFocus, 
     // Feature-detect the native BarcodeDetector
     setSupported(typeof window !== "undefined" && "BarcodeDetector" in window);
   }, []);
+
+  // Kept stable so the scanner never restarts its camera when the parent
+  // form re-renders — that restart was the cause of the flickering preview.
+  const handleDetected = useCallback((code) => {
+    onChange(code);
+    setScanOpen(false);
+  }, [onChange]);
 
   return (
     <>
@@ -54,7 +70,7 @@ export default function BarcodeInput({ value, onChange, placeholder, autoFocus, 
         <ScannerModal
           supported={supported}
           onClose={() => setScanOpen(false)}
-          onDetected={code => { onChange(code); setScanOpen(false); }}
+          onDetected={handleDetected}
         />
       )}
     </>
@@ -64,14 +80,21 @@ export default function BarcodeInput({ value, onChange, placeholder, autoFocus, 
 function ScannerModal({ onClose, onDetected, supported }) {
   const videoRef  = useRef(null);
   const streamRef = useRef(null);
-  const rafRef    = useRef(null);
+  const timerRef  = useRef(null);
+  const canvasRef = useRef(null);
+  const detectedRef = useRef(false);
   const [err, setErr]       = useState("");
   const [manual, setManual] = useState("");
   const [ready, setReady]   = useState(false);
 
+  // The callback is read through a ref so changing it never restarts the camera
+  const onDetectedRef = useRef(onDetected);
+  onDetectedRef.current = onDetected;
+
   useEffect(() => {
     let detector = null;
     let cancelled = false;
+    let pass = 0;
 
     async function start() {
       if (!supported) {
@@ -85,28 +108,80 @@ function ScannerModal({ onClose, onDetected, supported }) {
         return;
       }
       try {
+        // A higher resolution and continuous autofocus matter a great deal for
+        // dense 1D barcodes — at 720p the bars often blur into each other.
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } }
+          video: {
+            facingMode: { ideal: "environment" },
+            width:  { ideal: 1920 },
+            height: { ideal: 1080 },
+            frameRate: { ideal: 30 },
+            advanced: [{ focusMode: "continuous" }],
+          }
         });
         if (cancelled) { stream.getTracks().forEach(t => t.stop()); return; }
         streamRef.current = stream;
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          await videoRef.current.play();
-          setReady(true);
-        }
-        const tick = async () => {
-          if (cancelled || !videoRef.current) return;
-          try {
-            const codes = await detector.detect(videoRef.current);
-            if (codes && codes.length > 0 && codes[0].rawValue) {
-              onDetected(codes[0].rawValue.trim());
-              return;
-            }
-          } catch (e) { /* frame not ready — keep polling */ }
-          rafRef.current = requestAnimationFrame(tick);
+
+        // Ask the camera to keep focusing; ignored silently when unsupported
+        try {
+          const track = stream.getVideoTracks()[0];
+          const caps = track.getCapabilities?.() || {};
+          const advanced = [];
+          if (caps.focusMode?.includes("continuous")) advanced.push({ focusMode: "continuous" });
+          if (caps.exposureMode?.includes("continuous")) advanced.push({ exposureMode: "continuous" });
+          if (advanced.length) await track.applyConstraints({ advanced });
+        } catch (e) { /* not supported on this camera */ }
+
+        const video = videoRef.current;
+        if (!video) return;
+        video.srcObject = stream;
+        video.setAttribute("playsinline", "true");
+        try { await video.play(); } catch (e) { /* autoplay retried below */ }
+        setReady(true);
+
+        const canvas = canvasRef.current || (canvasRef.current = document.createElement("canvas"));
+        const ctx = canvas.getContext("2d", { willReadFrequently: true });
+
+        const scan = async () => {
+          if (cancelled || detectedRef.current) return;
+          const v = videoRef.current;
+
+          if (v && v.paused && v.srcObject) { try { await v.play(); } catch (e) {} }
+
+          if (v && v.videoWidth > 0) {
+            try {
+              // Most passes look only inside the guide box, which is both faster
+              // and less likely to lock on to a neighbouring label. Every fourth
+              // pass sweeps the whole frame in case the code sits off-centre.
+              let source = v;
+              if (pass % 4 !== 3) {
+                const vw = v.videoWidth, vh = v.videoHeight;
+                const cw = Math.round(vw * CROP_W), ch = Math.round(vh * CROP_H);
+                if (canvas.width !== cw || canvas.height !== ch) {
+                  canvas.width = cw; canvas.height = ch;
+                }
+                ctx.drawImage(v, Math.round((vw - cw) / 2), Math.round((vh - ch) / 2),
+                                 cw, ch, 0, 0, cw, ch);
+                source = canvas;
+              }
+              pass++;
+
+              const codes = await detector.detect(source);
+              const hit = codes?.find(c => c.rawValue && c.rawValue.trim());
+              if (hit) {
+                detectedRef.current = true;
+                onDetectedRef.current(hit.rawValue.trim());
+                return;
+              }
+            } catch (e) { /* frame not ready — keep polling */ }
+          }
+
+          if (!cancelled && !detectedRef.current) {
+            timerRef.current = setTimeout(scan, SCAN_INTERVAL_MS);
+          }
         };
-        rafRef.current = requestAnimationFrame(tick);
+
+        timerRef.current = setTimeout(scan, SCAN_INTERVAL_MS);
       } catch (e) {
         setErr("Camera access was denied or is unavailable. Enter the code manually below.");
       }
@@ -115,10 +190,11 @@ function ScannerModal({ onClose, onDetected, supported }) {
     start();
     return () => {
       cancelled = true;
-      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      if (timerRef.current) clearTimeout(timerRef.current);
       if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
+      streamRef.current = null;
     };
-  }, [supported, onDetected]);
+  }, [supported]);
 
   return (
     <Modal
@@ -141,7 +217,7 @@ function ScannerModal({ onClose, onDetected, supported }) {
         : (
           <>
             <div className="scanner-box">
-              <video ref={videoRef} playsInline muted />
+              <video ref={videoRef} playsInline muted autoPlay />
               <div className="scan-frame" />
               <div className="scan-line" />
             </div>
