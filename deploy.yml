@@ -1,0 +1,53 @@
+name: Build and deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      # Repository secrets win when they exist; otherwise the committed .env
+      # is used. Either way the key ends up inside the bundle, which is fine —
+      # it is a publishable key and the data is protected by RLS policies.
+      - name: Build
+        run: |
+          if [ -n "${{ secrets.VITE_SUPABASE_URL }}" ]; then
+            printf 'VITE_SUPABASE_URL=%s\nVITE_SUPABASE_KEY=%s\n' \
+              "${{ secrets.VITE_SUPABASE_URL }}" "${{ secrets.VITE_SUPABASE_KEY }}" > .env
+          fi
+          npm run build
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

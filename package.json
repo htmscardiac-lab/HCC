@@ -1,0 +1,52 @@
+{
+  "name": "htms-platform",
+  "version": "2.3.0",
+  "description": "HTMS Unified Maintenance Platform - HCC, PPM, Corrective Maintenance",
+  "author": "MNGHA - Healthcare Technology Management Services",
+  "main": "electron.cjs",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "dist": "vite build && electron-builder"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.110.8",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^6.0.1",
+    "electron": "^42.0.0",
+    "electron-builder": "^26.8.1",
+    "vite": "^8.0.10"
+  },
+  "build": {
+    "appId": "com.mngha.htms",
+    "productName": "HTMS Platform",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron.cjs",
+      "public/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "public/icon.png",
+        "to": "icon.png"
+      }
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "public/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "createDesktopShortcut": true,
+      "allowToChangeInstallationDirectory": true
+    }
+  }
+}

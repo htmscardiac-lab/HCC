@@ -1,0 +1,7 @@
+node_modules/
+dist/
+release/
+*.log
+
+# Older copy of the project kept on the Desktop — not part of the build
+htms-platform/
