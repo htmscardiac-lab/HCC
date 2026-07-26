@@ -251,7 +251,7 @@ function PPMList({ records, setRecords, session, mode }) {
               <button className="btn-gold btn-sm" onClick={() => exportPPMRecord(r)}>
                 <Ic d={D.excel} size={12} stroke="#fff" /> Export Excel
               </button>
-              {awaiting ? (
+              {session.role === "admin" && (awaiting ? (
                 <button className="btn-primary btn-sm" onClick={() => markLogged(r.id)}>
                   <Ic d={D.check} size={12} stroke="#fff" /> Mark Done → History
                 </button>
@@ -259,7 +259,7 @@ function PPMList({ records, setRecords, session, mode }) {
                 <button className="btn-ghost btn-sm" onClick={() => reopen(r.id)} title="Send back to Awaiting Transfer">
                   <Ic d={D.arrowL} size={12} /> Reopen
                 </button>
-              )}
+              ))}
               {session.role === "admin" && (
                 <button className="btn-danger btn-sm"
                         onClick={() => { if (window.confirm("Delete this PPM record?")) setRecords(rs => rs.filter(x => x.id !== r.id)); }}>

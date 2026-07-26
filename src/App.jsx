@@ -4,6 +4,7 @@ import { MNGHA_LOGO, HTMS_LOGO } from "./lib/logos.js";
 import { Ic, D, uid, Modal, SL } from "./lib/utils.jsx";
 import { friendlyError } from "./lib/supabase.js";
 import { useSynced } from "./lib/useSynced.js";
+import { writesSettled, syncState } from "./lib/syncState.js";
 import * as api from "./lib/api.js";
 import Launcher from "./components/Launcher.jsx";
 import ChecklistBuilder from "./components/ChecklistBuilder.jsx";
@@ -38,7 +39,10 @@ export default function App() {
 
   const onError = useCallback((err) => {
     console.error(err);
-    setError(friendlyError(err));
+    // A failed save keeps the entry on screen (we do NOT resync it away, so the
+    // user never loses typed work) and shows a clear, persistent banner telling
+    // them it has not been saved yet.
+    setError(friendlyError(err) + " — your entry is not saved yet. Check the connection and try again.");
   }, []);
 
   // Shared data — the setters keep the same signature the screens already use,
@@ -58,9 +62,18 @@ export default function App() {
 
   const sessionRef = useRef(session);
   sessionRef.current = session;
+  const reloadTimer = useRef(null);
 
   const reload = useCallback(async () => {
     if (!sessionRef.current) return;
+    // Never overwrite local edits that are still being saved — wait until the
+    // write queue is quiet, then refresh. This stops a realtime event from
+    // wiping an entry the user just made.
+    if (!writesSettled()) {
+      clearTimeout(reloadTimer.current);
+      reloadTimer.current = setTimeout(() => reload(), 1200);
+      return;
+    }
     try {
       setUsersState(await api.loadUsers());
       const [lists, tpls, recs, reqs] = await Promise.all([
@@ -118,6 +131,7 @@ export default function App() {
       <>
         <style>{STYLE}</style>
         {error && <ErrorBar message={error} onClose={() => setError("")} />}
+        <SaveStatus />
         <Launcher session={session} onPick={setModule} onLogout={logout} stats={stats} />
       </>
     );
@@ -129,6 +143,7 @@ export default function App() {
     <>
       <style>{STYLE}</style>
       {error && <ErrorBar message={error} onClose={() => setError("")} />}
+      <SaveStatus />
       <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
         <AppHeader
           session={session}
@@ -178,6 +193,46 @@ export default function App() {
                       onClose={() => setShowLists(false)} />
       )}
     </>
+  );
+}
+
+/**
+ * Small pill, bottom-right, that makes saving visible: "Saving…" while a write
+ * is in flight, then "Saved" briefly once it lands. Driven by the shared
+ * syncState so it reflects the real write queue, not a guess.
+ */
+function SaveStatus() {
+  const [st, setSt] = useState("idle"); // idle | saving | saved
+  useEffect(() => {
+    let prev = 0, hide = null;
+    const t = setInterval(() => {
+      const p = syncState.pending;
+      if (p > 0) { setSt("saving"); clearTimeout(hide); }
+      else if (prev > 0) { setSt("saved"); hide = setTimeout(() => setSt("idle"), 2200); }
+      prev = p;
+    }, 250);
+    return () => { clearInterval(t); clearTimeout(hide); };
+  }, []);
+
+  if (st === "idle") return null;
+  const saving = st === "saving";
+  return (
+    <div style={{
+      position: "fixed", bottom: 16, right: 16, zIndex: 8000,
+      display: "flex", alignItems: "center", gap: 8, padding: "8px 14px",
+      borderRadius: 20, fontSize: 12.5, fontWeight: 700,
+      background: saving ? "var(--gold-lt)" : "var(--green-lt)",
+      color: saving ? "var(--gold)" : "var(--green)",
+      border: "1px solid " + (saving ? "var(--gold-mid)" : "var(--green-mid)"),
+      boxShadow: "var(--shadow)",
+    }}>
+      <span style={{
+        width: 8, height: 8, borderRadius: "50%",
+        background: saving ? "var(--gold)" : "var(--green)",
+        animation: saving ? "pulse 1s infinite" : "none",
+      }} />
+      {saving ? "Saving…" : "Saved"}
+    </div>
   );
 }
 
