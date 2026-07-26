@@ -3,22 +3,32 @@ import { Ic, D, uid, ts, fmt, Modal, Empty, SH, SL, SearchBar } from "../lib/uti
 import BarcodeInput from "../components/BarcodeScanner.jsx";
 import ChecklistRunner from "../components/ChecklistRunner.jsx";
 import { modelKey } from "../components/ListsManager.jsx";
+import { exportPPMRecord, exportPPMList } from "../lib/exportRecords.js";
+
+const isClosed = (r) => r.cmmsStatus === "closed";
 
 /**
  * PPM — Preventive Maintenance
- * Flow: select device type → select model → enter HTM/SN → run checklist → save record
+ * Flow: select device type → select model → enter HTM/SN → run checklist → save.
+ *
+ * A record then sits in "Awaiting CMMS" until the engineer has entered it into
+ * the hospital CMMS and marks it logged, which moves it to History.
+ *   New PPM  →  Awaiting CMMS  →  History
  */
 export default function PPM({ records, setRecords, session, deviceTypes, models, templates }) {
   const [tab, setTab] = useState("new");
 
   const ppmRecords = records.filter(r => r.module === "PPM");
+  const awaiting = ppmRecords.filter(r => !isClosed(r));
+  const history  = ppmRecords.filter(isClosed);
 
   return (
     <div>
       <div className="tab-bar" style={{ marginBottom: 20 }}>
         {[
-          { k: "new",     l: "New PPM",  icon: D.plus,    n: null },
-          { k: "history", l: "History",  icon: D.archive, n: ppmRecords.length },
+          { k: "new",      l: "New PPM",          icon: D.plus,    n: null },
+          { k: "awaiting", l: "Awaiting Transfer", icon: D.clock,  n: awaiting.length },
+          { k: "history",  l: "History",          icon: D.archive, n: history.length },
         ].map(t => (
           <button key={t.k} className={"tab-btn" + (tab === t.k ? " active" : "")} onClick={() => setTab(t.k)}>
             <Ic d={t.icon} size={13} /> {t.l}
@@ -27,11 +37,13 @@ export default function PPM({ records, setRecords, session, deviceTypes, models,
         ))}
       </div>
 
-      {tab === "new"     && <NewPPM setRecords={setRecords} session={session} deviceTypes={deviceTypes} models={models} templates={templates} onDone={() => setTab("history")} />}
-      {tab === "history" && <PPMHistory records={ppmRecords} setRecords={setRecords} session={session} />}
+      {tab === "new"      && <NewPPM setRecords={setRecords} session={session} deviceTypes={deviceTypes} models={models} templates={templates} onDone={() => setTab("awaiting")} />}
+      {tab === "awaiting" && <PPMList records={awaiting} setRecords={setRecords} session={session} mode="awaiting" />}
+      {tab === "history"  && <PPMList records={history}  setRecords={setRecords} session={session} mode="history" />}
     </div>
   );
 }
+
 
 function NewPPM({ setRecords, session, deviceTypes, models, templates, onDone }) {
   const [stage, setStage]   = useState(1);   // 1 = device info, 2 = checklist
@@ -175,9 +187,11 @@ function NewPPM({ setRecords, session, deviceTypes, models, templates, onDone })
   );
 }
 
-function PPMHistory({ records, setRecords, session }) {
+function PPMList({ records, setRecords, session, mode }) {
   const [q, setQ] = useState("");
   const [view, setView] = useState(null);
+
+  const awaiting = mode === "awaiting";
 
   const list = records.filter(r => {
     if (!q) return true;
@@ -188,26 +202,39 @@ function PPMHistory({ records, setRecords, session }) {
         || (r.location || "").toLowerCase().includes(s);
   });
 
+  const markLogged = (id) =>
+    setRecords(rs => rs.map(r => r.id === id ? { ...r, cmmsStatus: "closed" } : r));
+  const reopen = (id) =>
+    setRecords(rs => rs.map(r => r.id === id ? { ...r, cmmsStatus: "pending" } : r));
+
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
-        <SH title="PPM History" sub="All completed preventive maintenance records" />
-        {session.role === "admin" && records.length > 0 && (
-          <button className="btn-danger btn-sm"
-                  onClick={() => { if (window.confirm(`Delete all ${records.length} PPM records? This cannot be undone.`)) setRecords(rs => rs.filter(r => r.module !== "PPM")); }}>
-            <Ic d={D.trash} size={13} /> Delete All
+        <SH title={awaiting ? "Awaiting Transfer" : "PPM History"}
+            sub={awaiting
+              ? "Records completed here and waiting to be entered into the CMMS. Review or export them, then mark as done."
+              : "All completed preventive maintenance records"} />
+        <div style={{ display: "flex", gap: 8 }}>
+          {session.role === "admin" && !awaiting && records.length > 0 && (
+            <button className="btn-danger btn-sm"
+                    onClick={() => { if (window.confirm(`Delete all ${records.length} PPM history records? This cannot be undone.`)) setRecords(rs => rs.filter(r => !(r.module === "PPM" && r.cmmsStatus === "closed"))); }}>
+              <Ic d={D.trash} size={13} /> Delete All
+            </button>
+          )}
+          <button className="btn-gold btn-sm" onClick={() => exportPPMList(list, awaiting ? "PPM_Awaiting" : "PPM_History")} disabled={list.length === 0}>
+            <Ic d={D.excel} size={13} stroke="#fff" /> Export All to Excel
           </button>
-        )}
+        </div>
       </div>
       <div style={{ marginBottom: 16 }}>
         <SearchBar value={q} onChange={setQ} placeholder="Search by HTM/SN, type, model, or location…" />
       </div>
 
-      {list.length === 0 && <Empty label="No PPM records yet" />}
+      {list.length === 0 && <Empty label={awaiting ? "Nothing awaiting CMMS entry" : "No history yet"} />}
 
       {list.map(r => (
-        <div key={r.id} className="card">
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <div key={r.id} className={"card" + (awaiting ? " card-overdue" : "")}>
+          <div className="cardhead" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
             <div style={{ display: "flex", gap: 9, alignItems: "center", flexWrap: "wrap" }}>
               <span style={{ fontFamily: "var(--mono)", fontWeight: 700, color: "var(--blue)", fontSize: 14 }}>{r.htmSn}</span>
               <span style={{ fontWeight: 600, fontSize: 14 }}>{r.deviceType}</span>
@@ -215,11 +242,24 @@ function PPMHistory({ records, setRecords, session }) {
               <span className={"badge " + (r.status === "pass" ? "badge-green" : "badge-red")}>
                 {r.status === "pass" ? "✓ PASS" : "✗ FAIL"}
               </span>
+              {awaiting && <span className="badge badge-orange">Awaiting Transfer</span>}
             </div>
-            <div style={{ display: "flex", gap: 8 }}>
+            <div className="card-actions" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               <button className="btn-ghost btn-sm" onClick={() => setView(r)}>
                 <Ic d={D.list} size={12} /> View Checklist
               </button>
+              <button className="btn-gold btn-sm" onClick={() => exportPPMRecord(r)}>
+                <Ic d={D.excel} size={12} stroke="#fff" /> Export Excel
+              </button>
+              {awaiting ? (
+                <button className="btn-primary btn-sm" onClick={() => markLogged(r.id)}>
+                  <Ic d={D.check} size={12} stroke="#fff" /> Mark Done → History
+                </button>
+              ) : (
+                <button className="btn-ghost btn-sm" onClick={() => reopen(r.id)} title="Send back to Awaiting Transfer">
+                  <Ic d={D.arrowL} size={12} /> Reopen
+                </button>
+              )}
               {session.role === "admin" && (
                 <button className="btn-danger btn-sm"
                         onClick={() => { if (window.confirm("Delete this PPM record?")) setRecords(rs => rs.filter(x => x.id !== r.id)); }}>
@@ -237,10 +277,52 @@ function PPMHistory({ records, setRecords, session }) {
               {r.checklist?.summary?.failed ? ` · ${r.checklist.summary.failed} fail` : ""}
             </span>
           </div>
+
+          {/* Awaiting cards show the full checklist inline so it can be copied
+              into the CMMS without opening a dialog. */}
+          {awaiting && <InlineChecklist record={r} />}
         </div>
       ))}
 
       {view && <ChecklistViewer record={view} onClose={() => setView(null)} />}
+    </div>
+  );
+}
+
+/** Full checklist values rendered inline (read-only), for CMMS transfer. */
+function InlineChecklist({ record }) {
+  const cl = record.checklist;
+  if (!cl) return null;
+  const steps = cl.stepsSnapshot || [];
+  if (!steps.length) return null;
+  return (
+    <div style={{ marginTop: 12, borderTop: "1px dashed var(--border)", paddingTop: 12, display: "flex", flexDirection: "column", gap: 5 }}>
+      {steps.map((s, i) => {
+        const a = cl.answers?.[s.id];
+        let display = "—", cls = null;
+        if (a) {
+          if (s.type === "pass_fail" || s.type === "pass_fail_na") {
+            display = a.value === "pass" ? "Pass" : a.value === "fail" ? "Fail" : "N/A";
+            cls = a.value === "pass" ? "badge-green" : a.value === "fail" ? "badge-red" : "badge-gray";
+          } else if (s.type === "number_range") {
+            const v = Number(a.value);
+            const lo = s.min === "" ? -Infinity : Number(s.min);
+            const hi = s.max === "" ?  Infinity : Number(s.max);
+            display = String(a.value) + (s.unit ? " " + s.unit : "");
+            cls = (!isNaN(v) && v >= lo && v <= hi) ? "badge-green" : "badge-red";
+          } else {
+            display = String(a.value ?? "—") + (s.unit ? " " + s.unit : "");
+          }
+        }
+        return (
+          <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 9, fontSize: 12.5 }}>
+            <span style={{ color: "var(--text3)", fontFamily: "var(--mono)", fontSize: 11, minWidth: 18 }}>{i + 1}.</span>
+            <span style={{ flex: 1, minWidth: 120, fontWeight: 500 }}>{s.label}</span>
+            {cls ? <span className={"badge " + cls}>{display}</span>
+                 : <span style={{ fontWeight: 600, color: "var(--text2)" }}>{display}</span>}
+          </div>
+        );
+      })}
     </div>
   );
 }

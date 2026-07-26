@@ -30,6 +30,29 @@ export const fmt = (iso) => {
 
 export const hoursAgo = (iso) => iso ? (Date.now() - new Date(iso).getTime()) / 3600000 : 0;
 
+// ── Clipboard ────────────────────────────────────────────────────────
+// Copies plain text, falling back to a hidden textarea when the async
+// Clipboard API is unavailable (older Electron / insecure origins).
+export async function copyText(text) {
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {}
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.focus(); ta.select();
+    const ok = document.execCommand("copy");
+    document.body.removeChild(ta);
+    return ok;
+  } catch { return false; }
+}
+
 // ── Storage ──────────────────────────────────────────────────────────
 export const load = (k, d) => {
   try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; }

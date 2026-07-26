@@ -438,6 +438,7 @@ function recordRow(r) {
       location: r.location || "",
       checklist: r.checklist ?? null,
       ppm_status: orNull(r.status),
+      cmms_status: r.cmmsStatus || "pending",
     };
   }
 
@@ -454,6 +455,7 @@ function recordRow(r) {
     inspection_details: orNull(r.inspectionDetails),
     action_taken: orNull(r.actionTaken),
     parts: r.parts || [],
+    cmms_status: r.cmmsStatus || "pending",
   };
 }
 
@@ -517,6 +519,7 @@ function recordFromRow(row, devices) {
       location: row.location || "",
       checklist: row.checklist || null,
       status: row.ppm_status || "",
+      cmmsStatus: row.cmms_status || "pending",
       performedBy: nameOf(row.created_by),
       performedAt: row.created_at,
     };
@@ -534,6 +537,7 @@ function recordFromRow(row, devices) {
     inspectionDetails: row.inspection_details || "",
     actionTaken: row.action_taken || "",
     parts: row.parts || [],
+    cmmsStatus: row.cmms_status || "pending",
     performedBy: nameOf(row.created_by),
     performedAt: row.created_at,
   };

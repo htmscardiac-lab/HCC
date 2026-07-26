@@ -6,10 +6,140 @@ import { ChecklistViewer } from "./PPM.jsx";
 
 const OVERDUE_H = 2;
 
+/**
+ * Edit an existing HCC record — patient details and the device list.
+ *
+ * Used from every stage. In "In Process" it is open to everyone; in Outgoing
+ * and Archive it is admin-only (the caller decides whether to render the button).
+ * Devices that already carry an inspection result keep it; only their
+ * identifying fields (HTM/SN, type, model, manufacturer) are editable here.
+ */
+function EditRecordModal({ record, deviceTypes = [], onSave, onClose }) {
+  const [mrn, setMrn]     = useState(record.mrn || "");
+  const [name, setName]   = useState(record.patientName || "");
+  const [ptype, setPtype] = useState(record.patientType || "outpatient");
+  const [ward, setWard]   = useState(record.ward || "");
+  const [phone, setPhone] = useState(record.phone || "");
+  const [devs, setDevs]   = useState(() =>
+    (record.devices || []).map(d => ({ ...d })).concat(
+      { id: uid(), htmSn: "", deviceType: "", model: "", manufacturer: "", _new: true }
+    )
+  );
+  const [err, setErr] = useState("");
+
+  const updDev = (id, k, v) => {
+    setDevs(ds => {
+      const next = ds.map(d => d.id === id ? { ...d, [k]: v } : d);
+      const last = next[next.length - 1];
+      if (last.htmSn.trim() && last.deviceType) {
+        next.push({ id: uid(), htmSn: "", deviceType: "", model: "", manufacturer: "", _new: true });
+      }
+      return next;
+    });
+  };
+  const removeDev = (id) => setDevs(ds => ds.filter(d => d.id !== id));
+
+  const save = () => {
+    setErr("");
+    if (!mrn.trim())   { setErr("MRN is required."); return; }
+    if (!name.trim())  { setErr("Patient Name is required."); return; }
+    if (!phone.trim()) { setErr("Phone / Extension is required."); return; }
+    if (ptype === "inpatient" && !ward.trim()) { setErr("Ward Number is required for Inpatient."); return; }
+
+    const filled = devs.filter(d => d.htmSn.trim() || d.deviceType);
+    if (!filled.length) { setErr("Keep at least one device."); return; }
+    if (filled.some(d => !d.htmSn.trim() || !d.deviceType)) {
+      setErr("Every device row needs an HTM/SN and a Device Type."); return;
+    }
+
+    onSave({
+      ...record,
+      mrn: mrn.trim(), patientName: name.trim(), patientType: ptype,
+      ward: ptype === "inpatient" ? ward.trim() : "", phone: phone.trim(),
+      devices: filled.map(({ _new, ...d }) => d),
+    });
+    onClose();
+  };
+
+  return (
+    <Modal title={`Edit Record — ${record.mrn || ""}`} onClose={onClose} wide
+      footer={<>
+        <button className="btn-ghost" onClick={onClose}>Cancel</button>
+        <button className="btn-primary" onClick={save}>
+          <Ic d={D.save} size={13} stroke="#fff" /> Save Changes
+        </button>
+      </>}>
+
+      {err && <div className="alert alert-error"><Ic d={D.close} size={13} />{err}</div>}
+
+      <SL>Patient Information</SL>
+      <div className="grid-3" style={{ marginTop: 12 }}>
+        <div className="field"><label>MRN *</label>
+          <input value={mrn} onChange={e => setMrn(e.target.value)} /></div>
+        <div className="field"><label>Patient Name *</label>
+          <input value={name} onChange={e => setName(e.target.value)} /></div>
+        <div className="field"><label>Patient Type *</label>
+          <select value={ptype} onChange={e => setPtype(e.target.value)}>
+            <option value="outpatient">Outpatient</option>
+            <option value="inpatient">Inpatient</option>
+          </select></div>
+      </div>
+      <div className="grid-3">
+        {ptype === "inpatient" && (
+          <div className="field"><label>Ward Number *</label>
+            <input value={ward} onChange={e => setWard(e.target.value)} placeholder="W-3A" /></div>
+        )}
+        <div className="field"><label>Phone / Extension *</label>
+          <input value={phone} onChange={e => setPhone(e.target.value)} /></div>
+      </div>
+
+      <div style={{ borderTop: "1px solid var(--border)", margin: "8px 0 16px" }} />
+      <SL>Devices — a new row is added automatically</SL>
+      <div style={{ marginTop: 12 }}>
+        {devs.map((d, i) => (
+          <div key={d.id} style={{ background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: 8, padding: 13, marginBottom: 9 }}>
+            <div className="grid-2" style={{ marginBottom: 9 }}>
+              <div className="field" style={{ marginBottom: 0 }}>
+                <label>HTM / SN {d.condition && <span className="badge badge-gray" style={{ marginLeft: 6 }}>inspected</span>}</label>
+                <BarcodeInput value={d.htmSn} onChange={v => updDev(d.id, "htmSn", v)}
+                              placeholder={d._new ? "(next device…)" : "Scan or type"} />
+              </div>
+              <div className="field" style={{ marginBottom: 0 }}>
+                <label>Device Type</label>
+                <select value={d.deviceType} onChange={e => updDev(d.id, "deviceType", e.target.value)}>
+                  <option value="">Select type…</option>
+                  {deviceTypes.map(t => <option key={t} value={t}>{t}</option>)}
+                  {/* keep an unknown existing value selectable */}
+                  {d.deviceType && !deviceTypes.includes(d.deviceType) && <option value={d.deviceType}>{d.deviceType}</option>}
+                </select>
+              </div>
+            </div>
+            <div className="grid-2">
+              <div className="field" style={{ marginBottom: 0 }}>
+                <label>Model</label>
+                <input value={d.model || ""} onChange={e => updDev(d.id, "model", e.target.value)} style={{ fontFamily: "var(--mono)" }} />
+              </div>
+              <div className="field" style={{ marginBottom: 0 }}>
+                <label>Manufacturer</label>
+                <input value={d.manufacturer || ""} onChange={e => updDev(d.id, "manufacturer", e.target.value)} />
+              </div>
+            </div>
+            {!d._new && devs.filter(x => !x._new).length > 1 && (
+              <button className="btn-danger btn-sm" style={{ marginTop: 9 }} onClick={() => removeDev(d.id)}>
+                <Ic d={D.trash} size={11} /> Remove device
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+    </Modal>
+  );
+}
+
 // ── Shared small row components ────────────────────────────────────────
 function RH({ r, children, archived }) {
   return (
-    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+    <div className="cardhead" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
       <div style={{ display: "flex", gap: 9, alignItems: "center", flexWrap: "wrap" }}>
         <span style={{ fontFamily: "var(--mono)", fontWeight: 700, color: "var(--green)", fontSize: 14 }}>{r.mrn}</span>
         <span style={{ fontWeight: 600, fontSize: 14 }}>{r.patientName || "—"}</span>
@@ -17,7 +147,7 @@ function RH({ r, children, archived }) {
         {r.patientType === "inpatient" && r.ward && <span className="badge badge-gray">Ward {r.ward}</span>}
         {archived && <span className="badge badge-green">Archived</span>}
       </div>
-      {children && <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>{children}</div>}
+      {children && <div className="card-actions" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>{children}</div>}
     </div>
   );
 }
@@ -110,9 +240,9 @@ export default function HCC({ records, setRecords, session, deviceTypes, templat
       </div>
 
       {tab === "incoming"   && <IncomingSection   setRecords={setRecords} session={session} deviceTypes={deviceTypes} />}
-      {tab === "in_process" && <InProcessSection  records={inProcess} setRecords={setRecords} session={session} templates={templates} />}
-      {tab === "outgoing"   && <OutgoingSection   records={outgoing}  setRecords={setRecords} session={session} />}
-      {tab === "archive"    && <ArchiveSection    records={archived}  setRecords={setRecords} session={session} />}
+      {tab === "in_process" && <InProcessSection  records={inProcess} setRecords={setRecords} session={session} templates={templates} deviceTypes={deviceTypes} />}
+      {tab === "outgoing"   && <OutgoingSection   records={outgoing}  setRecords={setRecords} session={session} deviceTypes={deviceTypes} />}
+      {tab === "archive"    && <ArchiveSection    records={archived}  setRecords={setRecords} session={session} deviceTypes={deviceTypes} />}
     </div>
   );
 }
@@ -262,10 +392,14 @@ function IncomingSection({ setRecords, session, deviceTypes }) {
 }
 
 // ── In Process — with checklist ────────────────────────────────────────
-function InProcessSection({ records, setRecords, session, templates }) {
+function InProcessSection({ records, setRecords, session, templates, deviceTypes }) {
   const [q, setQ] = useState("");
   const [runner, setRunner] = useState(null); // { recordId, device, template }
   const [viewCl, setViewCl] = useState(null);
+  const [edit, setEdit] = useState(null);
+
+  const saveEdit = (updated) =>
+    setRecords(rs => rs.map(r => r.id === updated.id ? updated : r));
 
   const list = records.filter(r => {
     if (!q) return true;
@@ -369,6 +503,9 @@ function InProcessSection({ records, setRecords, session, templates }) {
             )}
 
             <RH r={r}>
+              <button className="btn-ghost btn-sm" onClick={() => setEdit(r)}>
+                <Ic d={D.pencil} size={13} /> Edit
+              </button>
               {session.role === "admin" && (
                 <button className="btn-danger btn-sm" onClick={() => delRec(r.id)}>
                   <Ic d={D.trash} size={13} /> Delete
@@ -440,14 +577,21 @@ function InProcessSection({ records, setRecords, session, templates }) {
       )}
 
       {viewCl && <ChecklistViewer record={viewCl} onClose={() => setViewCl(null)} />}
+      {edit && (
+        <EditRecordModal record={edit} deviceTypes={deviceTypes}
+                         onSave={saveEdit} onClose={() => setEdit(null)} />
+      )}
     </div>
   );
 }
 
 // ── Outgoing ───────────────────────────────────────────────────────────
-function OutgoingSection({ records, setRecords, session }) {
+function OutgoingSection({ records, setRecords, session, deviceTypes }) {
   const [q, setQ] = useState("");
   const [viewCl, setViewCl] = useState(null);
+  const [edit, setEdit] = useState(null);
+  const saveEdit = (updated) =>
+    setRecords(rs => rs.map(r => r.id === updated.id ? updated : r));
 
   const list = records.filter(r => {
     if (!q) return true;
@@ -494,6 +638,11 @@ function OutgoingSection({ records, setRecords, session }) {
           <div key={r.id} className="card">
             <RH r={r}>
               {session.role === "admin" && (
+                <button className="btn-ghost btn-sm" onClick={() => setEdit(r)}>
+                  <Ic d={D.pencil} size={13} /> Edit
+                </button>
+              )}
+              {session.role === "admin" && (
                 <button className="btn-danger btn-sm"
                         onClick={() => { if (window.confirm("Delete this record?")) setRecords(rs => rs.filter(x => x.id !== r.id)); }}>
                   <Ic d={D.trash} size={13} /> Delete
@@ -537,15 +686,22 @@ function OutgoingSection({ records, setRecords, session }) {
       })}
 
       {viewCl && <ChecklistViewer record={viewCl} onClose={() => setViewCl(null)} />}
+      {edit && (
+        <EditRecordModal record={edit} deviceTypes={deviceTypes}
+                         onSave={saveEdit} onClose={() => setEdit(null)} />
+      )}
     </div>
   );
 }
 
 // ── Archive ────────────────────────────────────────────────────────────
-function ArchiveSection({ records, setRecords, session }) {
+function ArchiveSection({ records, setRecords, session, deviceTypes }) {
   const [q, setQ] = useState("");
   const [cond, setCond] = useState("all");
   const [viewCl, setViewCl] = useState(null);
+  const [edit, setEdit] = useState(null);
+  const saveEdit = (updated) =>
+    setRecords(rs => rs.map(r => r.id === updated.id ? updated : r));
 
   const list = records.filter(r => {
     if (cond !== "all" && !r.devices.some(d => d.condition === cond)) return false;
@@ -610,6 +766,11 @@ function ArchiveSection({ records, setRecords, session }) {
         <div key={r.id} className="card">
           <RH r={r} archived>
             {session.role === "admin" && (
+              <button className="btn-ghost btn-sm" onClick={() => setEdit(r)}>
+                <Ic d={D.pencil} size={13} /> Edit
+              </button>
+            )}
+            {session.role === "admin" && (
               <button className="btn-danger btn-sm"
                       onClick={() => { if (window.confirm("Delete this record?")) setRecords(rs => rs.filter(x => x.id !== r.id)); }}>
                 <Ic d={D.trash} size={13} /> Delete
@@ -645,6 +806,10 @@ function ArchiveSection({ records, setRecords, session }) {
       ))}
 
       {viewCl && <ChecklistViewer record={viewCl} onClose={() => setViewCl(null)} />}
+      {edit && (
+        <EditRecordModal record={edit} deviceTypes={deviceTypes}
+                         onSave={saveEdit} onClose={() => setEdit(null)} />
+      )}
     </div>
   );
 }

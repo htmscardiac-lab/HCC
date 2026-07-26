@@ -201,7 +201,7 @@ function ErrorBar({ message, onClose }) {
 // ── Header ─────────────────────────────────────────────────────────────
 function AppHeader({ session, module, meta, onBack, onLogout, onUsers, onBuilder, onLists, pendingCount }) {
   return (
-    <header style={{
+    <header className="app-header" style={{
       background: "var(--green3)", borderBottom: "3px solid var(--gold)",
       padding: "0 20px", height: 64, display: "flex", alignItems: "center",
       justifyContent: "space-between", flexShrink: 0, boxShadow: "0 2px 12px rgba(0,0,0,.18)"
@@ -215,9 +215,9 @@ function AppHeader({ session, module, meta, onBack, onLogout, onUsers, onBuilder
         </button>
 
         <img src={MNGHA_LOGO} alt="MNGHA" style={{ width: 42, height: 42, borderRadius: "50%", objectFit: "cover", border: "2px solid var(--gold)", background: "#fff", flexShrink: 0 }} />
-        <img src={HTMS_LOGO} alt="HTMS" style={{ width: 40, height: 40, borderRadius: 7, objectFit: "cover", border: "1px solid rgba(255,255,255,.2)", flexShrink: 0 }} />
+        <img className="header-logo2" src={HTMS_LOGO} alt="HTMS" style={{ width: 40, height: 40, borderRadius: 7, objectFit: "cover", border: "1px solid rgba(255,255,255,.2)", flexShrink: 0 }} />
 
-        <div style={{ width: 1, height: 34, background: "rgba(255,255,255,.2)", margin: "0 4px", flexShrink: 0 }} />
+        <div className="header-logo2" style={{ width: 1, height: 34, background: "rgba(255,255,255,.2)", margin: "0 4px", flexShrink: 0 }} />
 
         <div style={{ display: "flex", alignItems: "center", gap: 9, minWidth: 0 }}>
           <div style={{
@@ -230,14 +230,14 @@ function AppHeader({ session, module, meta, onBack, onLogout, onUsers, onBuilder
             <div style={{ color: "#fff", fontWeight: 700, fontSize: 14, whiteSpace: "nowrap" }}>
               {module} — {meta.name}
             </div>
-            <div style={{ color: "rgba(255,255,255,.45)", fontSize: 11 }}>
+            <div className="header-sub" style={{ color: "rgba(255,255,255,.45)", fontSize: 11 }}>
               HTMS Platform <span style={{ fontFamily: "var(--mono)", opacity: .7 }}>v{VERSION}</span>
             </div>
           </div>
         </div>
       </div>
 
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+      <div className="header-actions" style={{ display: "flex", alignItems: "center", gap: 10 }}>
         {session.role === "admin" && (
           <>
             <button onClick={onBuilder} title="Checklist Builder" style={hBtn}>

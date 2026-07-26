@@ -123,8 +123,63 @@ export const STYLE = `
   .parts-table td { border-bottom: 1px solid var(--border); padding: 6px; }
   .parts-table input { padding: 6px 9px; font-size: 13px; }
 
+  /* ── Tablet ──────────────────────────────────────────────────── */
+  @media (max-width: 900px) {
+    .grid-3 { grid-template-columns: 1fr 1fr; }
+  }
+
+  /* ── Phone ───────────────────────────────────────────────────── */
   @media (max-width: 700px) {
-    .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
-    .modal { width: 100%; max-height: 94vh; }
+    body { font-size: 15px; -webkit-text-size-adjust: 100%; }
+
+    /* Stack form fields, but keep the stat row two-up so it stays compact */
+    .grid-2, .grid-3 { grid-template-columns: 1fr; }
+    .grid-4 { grid-template-columns: 1fr 1fr; gap: 8px; }
+
+    .modal-overlay { padding: 0; align-items: flex-end; }
+    .modal, .modal-wide { width: 100%; max-width: 100%; max-height: 92vh;
+      border-radius: 16px 16px 0 0; }
+    .modal-body { padding: 16px; }
+    .modal-header { padding: 14px 16px; }
+    .modal-footer { padding: 12px 16px; gap: 8px; }
+    .modal-footer button { flex: 1; justify-content: center; }
+
+    /* 16px inputs stop iOS/Android from zooming when a field is focused */
+    input, select, textarea { font-size: 16px; padding: 11px 13px; }
+    label { font-size: 12.5px; }
+
+    /* Bigger tap targets everywhere */
+    button { padding: 10px 16px; }
+    .btn-sm { padding: 8px 12px; font-size: 13px; }
+    .btn-lg { width: 100%; justify-content: center; padding: 14px; }
+
+    .card { padding: 14px; }
+    .stat-value { font-size: 25px; }
+    .stat-card { padding: 12px 14px; }
+
+    /* Cards: header rows and their action buttons wrap and go full width */
+    .cardhead { flex-direction: column; align-items: stretch !important; gap: 10px; }
+    .card-actions { width: 100%; }
+    .card-actions button { flex: 1; justify-content: center; }
+
+    /* Device rows read top-to-bottom instead of squeezing sideways */
+    .device-row { flex-direction: column; align-items: stretch; gap: 9px; }
+    .device-row .btn-sm, .device-row button { width: 100%; justify-content: center; }
+
+    /* Tabs scroll and space out for thumbs */
+    .tab-bar { gap: 2px; }
+    .tab-btn { padding: 12px 14px; font-size: 13px; }
+
+    /* Scanner fills the width of the sheet */
+    .scanner-box { max-width: 100%; aspect-ratio: 3/4; }
+  }
+
+  /* ── App header collapses on small screens ───────────────────── */
+  @media (max-width: 820px) {
+    .app-header { height: auto !important; flex-wrap: wrap; gap: 8px; padding: 10px 14px !important; }
+    .app-header .header-logo2, .app-header .header-sub { display: none; }
+    .app-header .header-actions { width: 100%; justify-content: flex-start; gap: 6px; flex-wrap: wrap; }
+    .app-header .header-actions button span { display: none; }
+    .app-header .header-actions button { padding: 9px 11px; }
   }
 `;

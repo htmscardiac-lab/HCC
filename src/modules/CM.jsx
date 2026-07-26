@@ -2,22 +2,30 @@ import React, { useState } from "react";
 import { Ic, D, uid, ts, fmt, Modal, Empty, SH, SL, SearchBar } from "../lib/utils.jsx";
 import BarcodeInput from "../components/BarcodeScanner.jsx";
 import { modelKey } from "../components/ListsManager.jsx";
+import { exportCMRecord, exportCMList } from "../lib/exportRecords.js";
+
+const isClosed = (r) => r.cmmsStatus === "closed";
 
 /**
  * CM — Corrective Maintenance
- * Single form, complete on submit:
- *   HTM No · reported problem · found problem · inspection details · parts used
+ * Single form, complete on submit. A finished work order then waits in
+ * "Awaiting CMMS" until the engineer logs it in the hospital CMMS and marks
+ * it done, which moves it to History.
+ *   New Work Order  →  Awaiting CMMS  →  History
  */
 export default function CM({ records, setRecords, session, deviceTypes, models, cmActions }) {
   const [tab, setTab] = useState("new");
   const cmRecords = records.filter(r => r.module === "CM");
+  const awaiting = cmRecords.filter(r => !isClosed(r));
+  const history  = cmRecords.filter(isClosed);
 
   return (
     <div>
       <div className="tab-bar" style={{ marginBottom: 20 }}>
         {[
-          { k: "new",     l: "New Work Order", icon: D.plus,    n: null },
-          { k: "history", l: "History",        icon: D.archive, n: cmRecords.length },
+          { k: "new",      l: "New Work Order",    icon: D.plus,    n: null },
+          { k: "awaiting", l: "Awaiting Transfer", icon: D.clock,   n: awaiting.length },
+          { k: "history",  l: "History",           icon: D.archive, n: history.length },
         ].map(t => (
           <button key={t.k} className={"tab-btn" + (tab === t.k ? " active" : "")} onClick={() => setTab(t.k)}>
             <Ic d={t.icon} size={13} /> {t.l}
@@ -26,11 +34,13 @@ export default function CM({ records, setRecords, session, deviceTypes, models, 
         ))}
       </div>
 
-      {tab === "new"     && <NewCM setRecords={setRecords} session={session} deviceTypes={deviceTypes} models={models} cmActions={cmActions} onDone={() => setTab("history")} />}
-      {tab === "history" && <CMHistory records={cmRecords} setRecords={setRecords} session={session} />}
+      {tab === "new"      && <NewCM setRecords={setRecords} session={session} deviceTypes={deviceTypes} models={models} cmActions={cmActions} onDone={() => setTab("awaiting")} />}
+      {tab === "awaiting" && <CMList records={awaiting} setRecords={setRecords} session={session} mode="awaiting" />}
+      {tab === "history"  && <CMList records={history}  setRecords={setRecords} session={session} mode="history" />}
     </div>
   );
 }
+
 
 const blankPart = () => ({ id: uid(), partNo: "", description: "", qty: "" });
 
@@ -232,9 +242,10 @@ function NewCM({ setRecords, session, deviceTypes, models, cmActions, onDone }) 
   );
 }
 
-function CMHistory({ records, setRecords, session }) {
+function CMList({ records, setRecords, session, mode }) {
   const [q, setQ] = useState("");
   const [view, setView] = useState(null);
+  const awaiting = mode === "awaiting";
 
   const list = records.filter(r => {
     if (!q) return true;
@@ -246,40 +257,27 @@ function CMHistory({ records, setRecords, session }) {
         || (r.location || "").toLowerCase().includes(s);
   });
 
-  const exportCsv = () => {
-    const head = ["HTM No", "Device Type", "Model", "Manufacturer", "Location",
-                  "Reported Problem", "Found Problem", "Inspection Details", "Action",
-                  "Parts", "Performed By", "Performed At"];
-    const rows = list.map(r => [
-      r.htmSn, r.deviceType, r.model, r.manufacturer, r.location,
-      r.reportedProblem, r.foundProblem, r.inspectionDetails,
-      r.actionTaken,
-      (r.parts || []).map(p => `${p.partNo} x${p.qty}`).join(" | "),
-      r.performedBy, fmt(r.performedAt)
-    ]);
-    const csv = [head, ...rows]
-      .map(row => row.map(c => `"${String(c ?? "").replace(/"/g, '""')}"`).join(","))
-      .join("\n");
-    const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = `CM_WorkOrders_${new Date().toISOString().slice(0,10)}.csv`;
-    a.click();
-  };
+  const markLogged = (id) =>
+    setRecords(rs => rs.map(r => r.id === id ? { ...r, cmmsStatus: "closed" } : r));
+  const reopen = (id) =>
+    setRecords(rs => rs.map(r => r.id === id ? { ...r, cmmsStatus: "pending" } : r));
 
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
-        <SH title="Work Order History" sub="All corrective maintenance records" />
+        <SH title={awaiting ? "Awaiting Transfer" : "Work Order History"}
+            sub={awaiting
+              ? "Work orders completed here and waiting to be entered into the CMMS. Review or export them, then mark as done."
+              : "All corrective maintenance work orders"} />
         <div style={{ display: "flex", gap: 8 }}>
-          {session.role === "admin" && records.length > 0 && (
+          {session.role === "admin" && !awaiting && records.length > 0 && (
             <button className="btn-danger btn-sm"
-                    onClick={() => { if (window.confirm(`Delete all ${records.length} work orders? This cannot be undone.`)) setRecords(rs => rs.filter(r => r.module !== "CM")); }}>
+                    onClick={() => { if (window.confirm(`Delete all ${records.length} history work orders? This cannot be undone.`)) setRecords(rs => rs.filter(r => !(r.module === "CM" && r.cmmsStatus === "closed"))); }}>
               <Ic d={D.trash} size={13} /> Delete All
             </button>
           )}
-          <button className="btn-gold btn-sm" onClick={exportCsv} disabled={list.length === 0}>
-            <Ic d={D.excel} size={13} stroke="#fff" /> Export to Excel
+          <button className="btn-gold btn-sm" onClick={() => exportCMList(list, awaiting ? "CM_Awaiting" : "CM_History")} disabled={list.length === 0}>
+            <Ic d={D.excel} size={13} stroke="#fff" /> Export All to Excel
           </button>
         </div>
       </div>
@@ -288,11 +286,11 @@ function CMHistory({ records, setRecords, session }) {
         <SearchBar value={q} onChange={setQ} placeholder="Search by HTM No, type, problem, or location…" />
       </div>
 
-      {list.length === 0 && <Empty label="No work orders yet" />}
+      {list.length === 0 && <Empty label={awaiting ? "Nothing awaiting CMMS entry" : "No history yet"} />}
 
       {list.map(r => (
-        <div key={r.id} className="card">
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <div key={r.id} className={"card" + (awaiting ? " card-overdue" : "")}>
+          <div className="cardhead" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
             <div style={{ display: "flex", gap: 9, alignItems: "center", flexWrap: "wrap" }}>
               <span style={{ fontFamily: "var(--mono)", fontWeight: 700, color: "var(--orange)", fontSize: 14 }}>{r.htmSn}</span>
               {r.deviceType && <span style={{ fontWeight: 600, fontSize: 14 }}>{r.deviceType}</span>}
@@ -301,11 +299,24 @@ function CMHistory({ records, setRecords, session }) {
               {(r.parts || []).length > 0 && (
                 <span className="badge badge-blue">{r.parts.length} part{r.parts.length === 1 ? "" : "s"}</span>
               )}
+              {awaiting && <span className="badge badge-gold">Awaiting Transfer</span>}
             </div>
-            <div style={{ display: "flex", gap: 8 }}>
+            <div className="card-actions" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               <button className="btn-ghost btn-sm" onClick={() => setView(r)}>
                 <Ic d={D.list} size={12} /> View Details
               </button>
+              <button className="btn-gold btn-sm" onClick={() => exportCMRecord(r)}>
+                <Ic d={D.excel} size={12} stroke="#fff" /> Export Excel
+              </button>
+              {awaiting ? (
+                <button className="btn-primary btn-sm" onClick={() => markLogged(r.id)}>
+                  <Ic d={D.check} size={12} stroke="#fff" /> Mark Done → History
+                </button>
+              ) : (
+                <button className="btn-ghost btn-sm" onClick={() => reopen(r.id)} title="Send back to Awaiting Transfer">
+                  <Ic d={D.arrowL} size={12} /> Reopen
+                </button>
+              )}
               {session.role === "admin" && (
                 <button className="btn-danger btn-sm"
                         onClick={() => { if (window.confirm("Delete this work order?")) setRecords(rs => rs.filter(x => x.id !== r.id)); }}>
@@ -315,20 +326,53 @@ function CMHistory({ records, setRecords, session }) {
             </div>
           </div>
 
-          <div style={{ fontSize: 13, color: "var(--text2)", marginTop: 9, lineHeight: 1.5 }}>
-            <strong style={{ color: "var(--text3)", fontSize: 11.5, textTransform: "uppercase", letterSpacing: ".04em" }}>Reported: </strong>
-            {r.reportedProblem.length > 110 ? r.reportedProblem.slice(0, 110) + "…" : r.reportedProblem}
-          </div>
-
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 9 }}>
             {r.location && <span className="info-pill">📍 {r.location}</span>}
             <span className="info-pill">📅 {fmt(r.performedAt)}</span>
             <span className="info-pill"><Ic d={D.user} size={11} /> {r.performedBy}</span>
           </div>
+
+          {awaiting ? (
+            /* Full detail inline so it can be transferred to the CMMS directly */
+            <div style={{ marginTop: 12, borderTop: "1px dashed var(--border)", paddingTop: 12, display: "flex", flexDirection: "column", gap: 10 }}>
+              <Field label="Problem reported by user">{r.reportedProblem}</Field>
+              <Field label="Problem found by engineer">{r.foundProblem}</Field>
+              <Field label="Inspection & repair details">{r.inspectionDetails}</Field>
+              {(r.parts || []).length > 0 && (
+                <div>
+                  <SL>Spare parts</SL>
+                  <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 3 }}>
+                    {r.parts.map(p => (
+                      <div key={p.id} style={{ fontSize: 12.5, color: "var(--text2)" }}>
+                        <span style={{ fontFamily: "var(--mono)" }}>{p.partNo}</span> · {p.description} · <strong>x{p.qty}</strong>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div style={{ fontSize: 13, color: "var(--text2)", marginTop: 9, lineHeight: 1.5 }}>
+              <strong style={{ color: "var(--text3)", fontSize: 11.5, textTransform: "uppercase", letterSpacing: ".04em" }}>Reported: </strong>
+              {(r.reportedProblem || "").length > 110 ? r.reportedProblem.slice(0, 110) + "…" : r.reportedProblem}
+            </div>
+          )}
         </div>
       ))}
 
       {view && <CMViewer record={view} onClose={() => setView(null)} />}
+    </div>
+  );
+}
+
+/** Small labelled block used in the inline CMMS-transfer view. */
+function Field({ label, children }) {
+  return (
+    <div>
+      <SL>{label}</SL>
+      <div style={{ fontSize: 13, color: "var(--text2)", lineHeight: 1.55, whiteSpace: "pre-wrap", marginTop: 4 }}>
+        {children || "—"}
+      </div>
     </div>
   );
 }
