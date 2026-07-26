@@ -103,6 +103,9 @@ export default function ChecklistRunner({ template, context, onSubmit, onCancel 
       templateName: template.name,
       deviceType: template.deviceType,
       model: template.model || "",
+      // Snapshot the step definitions so the saved record can always be shown
+      // in full later, even if the template is edited or deleted afterwards.
+      stepsSnapshot: steps,
       answers,
       summary,
       completedAt: ts()

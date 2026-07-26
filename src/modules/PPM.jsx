@@ -331,7 +331,16 @@ function InlineChecklist({ record }) {
 export function ChecklistViewer({ record, onClose }) {
   const cl = record.checklist;
   if (!cl) return null;
-  const steps = cl.stepsSnapshot || [];
+  // Older records (saved before the fix) may not carry the step definitions.
+  // Fall back to reconstructing rows from the answers so their values still show.
+  let steps = cl.stepsSnapshot || [];
+  if (steps.length === 0 && cl.answers) {
+    steps = Object.keys(cl.answers).map((id, i) => ({
+      id, label: `Item ${i + 1}`,
+      type: (cl.answers[id]?.value === "pass" || cl.answers[id]?.value === "fail" || cl.answers[id]?.value === "na")
+        ? "pass_fail_na" : "text_short",
+    }));
+  }
 
   return (
     <Modal title={`Checklist — ${record.htmSn || ""}`} onClose={onClose} wide
