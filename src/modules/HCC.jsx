@@ -188,6 +188,71 @@ function LiveClock({ onTick, manualRef }) {
   return null;
 }
 
+/**
+ * Append-only notes for an HCC record (used in Outgoing).
+ *
+ * Anyone may add a note; it is stamped with the author and the exact time and
+ * can never be edited. Notes are shown in the order they were written. Only an
+ * admin may delete a note.
+ */
+function NotesModal({ record, session, onAdd, onDelete, onClose }) {
+  const [text, setText] = useState("");
+  const notes = record?.notes || [];
+
+  const add = () => {
+    if (!text.trim()) return;
+    onAdd(record.id, text.trim());
+    setText("");
+  };
+
+  return (
+    <Modal title={`Notes — ${record?.mrn || ""}`} onClose={onClose} wide
+      footer={<button className="btn-ghost" onClick={onClose}>Close</button>}>
+
+      <SL>Notes are permanent — they can be added but never edited</SL>
+
+      <div style={{ marginTop: 12, marginBottom: 18 }}>
+        {notes.length === 0 && <Empty label="No notes yet" sub="Add the first note below" />}
+
+        {notes.map((n, i) => (
+          <div key={n.id} style={{
+            background: "var(--surface2)", border: "1px solid var(--border)",
+            borderRadius: 9, padding: "11px 14px", marginBottom: 9
+          }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 6 }}>
+              <span style={{
+                width: 22, height: 22, borderRadius: 6, background: "var(--green-lt)",
+                color: "var(--green)", fontSize: 11, fontWeight: 800, fontFamily: "var(--mono)",
+                display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0
+              }}>{i + 1}</span>
+              <span style={{ fontWeight: 700, fontSize: 13 }}>{n.by}</span>
+              <span className="info-pill">🕒 {fmt(n.at)}</span>
+              {session.role === "admin" && (
+                <button className="btn-danger btn-sm" style={{ marginLeft: "auto" }}
+                        onClick={() => { if (window.confirm("Delete this note permanently?")) onDelete(record.id, n.id); }}>
+                  <Ic d={D.trash} size={11} /> Delete
+                </button>
+              )}
+            </div>
+            <div style={{ fontSize: 13.5, color: "var(--text2)", lineHeight: 1.6, whiteSpace: "pre-wrap" }}>
+              {n.text}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ borderTop: "1px solid var(--border)", paddingTop: 14 }}>
+        <label>Add a note</label>
+        <textarea value={text} onChange={e => setText(e.target.value)} autoFocus
+                  placeholder="Type your note…" style={{ minHeight: 90, fontSize: 13 }} />
+        <button className="btn-primary" style={{ marginTop: 10 }} onClick={add} disabled={!text.trim()}>
+          <Ic d={D.plus} size={13} stroke="#fff" /> Add Note
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
 // ── HCC root ───────────────────────────────────────────────────────────
 export default function HCC({ records, setRecords, session, deviceTypes, templates }) {
   const [tab, setTab] = useState("incoming");
@@ -590,8 +655,20 @@ function OutgoingSection({ records, setRecords, session, deviceTypes }) {
   const [q, setQ] = useState("");
   const [viewCl, setViewCl] = useState(null);
   const [edit, setEdit] = useState(null);
+  const [notesId, setNotesId] = useState(null);
   const saveEdit = (updated) =>
     setRecords(rs => rs.map(r => r.id === updated.id ? updated : r));
+
+  const addNote = (rid, text) =>
+    setRecords(rs => rs.map(r => r.id !== rid ? r : {
+      ...r, notes: [...(r.notes || []), { id: uid(), text, by: session.username, at: ts() }]
+    }));
+  const deleteNote = (rid, nid) =>
+    setRecords(rs => rs.map(r => r.id !== rid ? r : {
+      ...r, notes: (r.notes || []).filter(n => n.id !== nid)
+    }));
+
+  const noteRec = records.find(r => r.id === notesId);
 
   const list = records.filter(r => {
     if (!q) return true;
@@ -637,6 +714,10 @@ function OutgoingSection({ records, setRecords, session, deviceTypes }) {
         return (
           <div key={r.id} className="card">
             <RH r={r}>
+              <button className="btn-ghost btn-sm" onClick={() => setNotesId(r.id)}>
+                <Ic d={D.text} size={13} /> Notes
+                {(r.notes || []).length > 0 && <span className="count-dot">{r.notes.length}</span>}
+              </button>
               {session.role === "admin" && (
                 <button className="btn-ghost btn-sm" onClick={() => setEdit(r)}>
                   <Ic d={D.pencil} size={13} /> Edit
@@ -690,6 +771,11 @@ function OutgoingSection({ records, setRecords, session, deviceTypes }) {
         <EditRecordModal record={edit} deviceTypes={deviceTypes}
                          onSave={saveEdit} onClose={() => setEdit(null)} />
       )}
+      {noteRec && (
+        <NotesModal record={noteRec} session={session}
+                    onAdd={addNote} onDelete={deleteNote}
+                    onClose={() => setNotesId(null)} />
+      )}
     </div>
   );
 }
@@ -700,8 +786,19 @@ function ArchiveSection({ records, setRecords, session, deviceTypes }) {
   const [cond, setCond] = useState("all");
   const [viewCl, setViewCl] = useState(null);
   const [edit, setEdit] = useState(null);
+  const [notesId, setNotesId] = useState(null);
   const saveEdit = (updated) =>
     setRecords(rs => rs.map(r => r.id === updated.id ? updated : r));
+
+  const addNote = (rid, text) =>
+    setRecords(rs => rs.map(r => r.id !== rid ? r : {
+      ...r, notes: [...(r.notes || []), { id: uid(), text, by: session.username, at: ts() }]
+    }));
+  const deleteNote = (rid, nid) =>
+    setRecords(rs => rs.map(r => r.id !== rid ? r : {
+      ...r, notes: (r.notes || []).filter(n => n.id !== nid)
+    }));
+  const noteRec = records.find(r => r.id === notesId);
 
   const list = records.filter(r => {
     if (cond !== "all" && !r.devices.some(d => d.condition === cond)) return false;
@@ -715,14 +812,16 @@ function ArchiveSection({ records, setRecords, session, deviceTypes }) {
     const head = ["MRN", "Patient Name", "Type", "Ward", "Phone", "Entry Date", "Exit Date",
                   "HTM/SN", "Device Type", "Model", "Manufacturer", "Condition",
                   "Checklist", "Pass", "Fail", "Return", "Report",
-                  "Created By", "Inspected By", "Inspection Date", "Completed By"];
+                  "Created By", "Inspected By", "Inspection Date", "Completed By", "Notes"];
+    const notesText = (r) => (r.notes || [])
+      .map(n => `[${fmt(n.at)} — ${n.by}] ${n.text}`).join(" | ");
     const rows = [];
     list.forEach(r => r.devices.forEach(d => rows.push([
       r.mrn, r.patientName, r.patientType, r.ward, r.phone, fmt(r.entryDate), fmt(r.exitDate),
       d.htmSn, d.deviceType, d.model || "", d.manufacturer || "", d.condition,
       d.checklist?.templateName || "", d.checklist?.summary?.passed ?? "", d.checklist?.summary?.failed ?? "",
       d.returnChecked ? "Yes" : "No", d.reportChecked ? "Yes" : "No",
-      r.createdBy, d.inspectedBy, fmt(d.inspectionDate), r.exitBy
+      r.createdBy, d.inspectedBy, fmt(d.inspectionDate), r.exitBy, notesText(r)
     ])));
     const csv = [head, ...rows]
       .map(row => row.map(c => `"${String(c ?? "").replace(/"/g, '""')}"`).join(","))
@@ -765,6 +864,10 @@ function ArchiveSection({ records, setRecords, session, deviceTypes }) {
       {list.map(r => (
         <div key={r.id} className="card">
           <RH r={r} archived>
+            <button className="btn-ghost btn-sm" onClick={() => setNotesId(r.id)}>
+              <Ic d={D.text} size={13} /> Notes
+              {(r.notes || []).length > 0 && <span className="count-dot">{r.notes.length}</span>}
+            </button>
             {session.role === "admin" && (
               <button className="btn-ghost btn-sm" onClick={() => setEdit(r)}>
                 <Ic d={D.pencil} size={13} /> Edit
@@ -809,6 +912,11 @@ function ArchiveSection({ records, setRecords, session, deviceTypes }) {
       {edit && (
         <EditRecordModal record={edit} deviceTypes={deviceTypes}
                          onSave={saveEdit} onClose={() => setEdit(null)} />
+      )}
+      {noteRec && (
+        <NotesModal record={noteRec} session={session}
+                    onAdd={addNote} onDelete={deleteNote}
+                    onClose={() => setNotesId(null)} />
       )}
     </div>
   );

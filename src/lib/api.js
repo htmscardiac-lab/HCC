@@ -426,6 +426,7 @@ function recordRow(r) {
       entry_date: orNull(r.entryDate),
       exit_date: orNull(r.exitDate),
       exit_by: idOf(r.exitBy),
+      notes: r.notes || [],
     };
   }
 
@@ -502,6 +503,7 @@ function recordFromRow(row, devices) {
       entryDate: row.entry_date || row.created_at,
       exitDate: row.exit_date || "",
       exitBy: row.exit_by ? nameOf(row.exit_by) : "",
+      notes: row.notes || [],
       createdBy: nameOf(row.created_by),
       createdAt: row.created_at,
       devices: (devices || [])
