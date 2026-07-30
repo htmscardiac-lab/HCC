@@ -4,7 +4,22 @@ import BarcodeInput from "../components/BarcodeScanner.jsx";
 import ChecklistRunner from "../components/ChecklistRunner.jsx";
 import { ChecklistViewer } from "./PPM.jsx";
 
-const OVERDUE_H = 2;
+const OVERDUE_H = 2;           // In Process: warn after two hours
+const OUTGOING_OVERDUE_H = 24; // Outgoing: warn after one day
+
+/** Hours a record has been sitting in Outgoing (falls back to entry time). */
+const outgoingHours = (r) => hoursAgo(r.outgoingAt || r.entryDate);
+const isOutgoingOverdue = (r) => outgoingHours(r) > OUTGOING_OVERDUE_H;
+
+/** Human "2h 15m" / "1d 3h" from a number of hours. */
+const durationText = (h) => {
+  if (h >= 24) {
+    const d = Math.floor(h / 24);
+    const rem = Math.floor(h % 24);
+    return `${d}d${rem ? " " + rem + "h" : ""}`;
+  }
+  return `${Math.floor(h)}h ${Math.round((h % 1) * 60)}m`;
+};
 
 /**
  * Edit an existing HCC record — patient details and the device list.
@@ -263,18 +278,20 @@ export default function HCC({ records, setRecords, session, deviceTypes, templat
   const outgoing  = hcc.filter(r => r.status === "outgoing");
   const archived  = hcc.filter(r => r.status === "archived");
   const overdue   = inProcess.filter(r => hoursAgo(r.entryDate) > OVERDUE_H).length;
+  const outOverdue = outgoing.filter(r =>
+    hoursAgo(r.outgoingAt || r.entryDate) > OUTGOING_OVERDUE_H).length;
 
   const stats = [
     { label: "Incoming",   value: inProcess.length + outgoing.length, color: "var(--blue)" },
     { label: "In Process", value: inProcess.length, color: overdue > 0 ? "var(--orange)" : "var(--gold)", warn: overdue },
-    { label: "Outgoing",   value: outgoing.length,  color: "var(--green)" },
+    { label: "Outgoing",   value: outgoing.length,  color: outOverdue > 0 ? "var(--orange)" : "var(--green)", warn: outOverdue },
     { label: "Archived",   value: archived.length,  color: "var(--text2)" },
   ];
 
   const tabs = [
     { key: "incoming",   label: "Incoming",   count: 0,                icon: D.inbox },
     { key: "in_process", label: "In Process", count: inProcess.length, icon: D.process, dot: overdue > 0 },
-    { key: "outgoing",   label: "Outgoing",   count: outgoing.length,  icon: D.outgoing },
+    { key: "outgoing",   label: "Outgoing",   count: outgoing.length,  icon: D.outgoing, dot: outOverdue > 0 },
     { key: "archive",    label: "Archive",    count: archived.length,  icon: D.archive },
   ];
 
@@ -533,9 +550,9 @@ function InProcessSection({ records, setRecords, session, templates, deviceTypes
       if (done.length === 0) return rs;
 
       if (pending.length === 0) {
-        return rs.map(r => r.id !== rid ? r : { ...r, status: "outgoing" });
+        return rs.map(r => r.id !== rid ? r : { ...r, status: "outgoing", outgoingAt: ts() });
       }
-      const moved = { ...rec, id: uid(), status: "outgoing", devices: done };
+      const moved = { ...rec, id: uid(), status: "outgoing", outgoingAt: ts(), devices: done };
       return rs.map(r => r.id !== rid ? r : { ...r, devices: pending }).concat([moved]);
     });
   };
@@ -711,8 +728,18 @@ function OutgoingSection({ records, setRecords, session, deviceTypes }) {
 
       {list.map(r => {
         const pending = r.devices.filter(d => !d.returnChecked && !d.reportChecked).length;
+        // Waiting time starts when the record reached Outgoing; older records
+        // saved before that stamp existed fall back to their entry date.
+        const waited = hoursAgo(r.outgoingAt || r.entryDate);
+        const isOverdue = waited > OUTGOING_OVERDUE_H;
         return (
-          <div key={r.id} className="card">
+          <div key={r.id} className={"card" + (isOverdue ? " card-overdue" : "")}>
+            {isOverdue && (
+              <div className="overdue-banner">
+                <Ic d={D.warn} size={13} />
+                Awaiting collection for {durationText(waited)} (limit: 1 day)
+              </div>
+            )}
             <RH r={r}>
               <button className="btn-ghost btn-sm" onClick={() => setNotesId(r.id)}>
                 <Ic d={D.text} size={13} /> Notes

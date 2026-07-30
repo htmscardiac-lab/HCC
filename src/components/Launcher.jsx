@@ -32,10 +32,12 @@ const MODULES = [
     color: "#d35400",
     tint: "#fef5ec",
     icon: D.wrench,
+    adminOnly: true,      // Corrective Maintenance is restricted to admins
   },
 ];
 
 export default function Launcher({ session, onPick, onLogout, stats }) {
+  const modules = MODULES.filter(m => !m.adminOnly || session.role === "admin");
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", background: "var(--bg)" }}>
       {/* Header */}
@@ -90,7 +92,7 @@ export default function Launcher({ session, onPick, onLogout, stats }) {
           </div>
 
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(270px,1fr))", gap: 18 }}>
-            {MODULES.map(m => (
+            {modules.map(m => (
               <div key={m.id} className="module-card" style={{ "--mcolor": m.color }}
                    onClick={() => onPick(m.id)}>
                 <div className="module-icon" style={{ background: m.tint, border: "1px solid " + m.color + "33" }}>

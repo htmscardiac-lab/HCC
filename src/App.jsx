@@ -55,7 +55,7 @@ export default function App() {
   const [models,    setModels,    resetModels]    = useSynced({}, api.syncModels,    onError);
   const [cmActions, setCmActions, resetActions]   = useSynced([], api.syncCmActions, onError);
 
-  const [module,    setModule]    = useState(null);
+  const [rawModule, setModule]    = useState(null);
   const [showUsers,   setShowUsers]   = useState(false);
   const [showBuilder, setShowBuilder] = useState(false);
   const [showLists,   setShowLists]   = useState(false);
@@ -121,6 +121,10 @@ export default function App() {
     return <><style>{STYLE}</style><Login onLogin={setSession} /></>;
   }
 
+  // Corrective Maintenance is admin-only — never render it for anyone else,
+  // even if the module was somehow selected.
+  const module = (rawModule === "CM" && session.role !== "admin") ? null : rawModule;
+
   if (!module) {
     const stats = {
       HCC: records.filter(r => r.module === "HCC").length,
@@ -167,8 +171,15 @@ export default function App() {
                  deviceTypes={dtypes.PPM} models={models} templates={templates} />
           )}
           {module === "CM" && (
-            <CM records={records} setRecords={setRecords} session={session}
-                deviceTypes={dtypes.CM} models={models} cmActions={cmActions} />
+            session.role === "admin" ? (
+              <CM records={records} setRecords={setRecords} session={session}
+                  deviceTypes={dtypes.CM} models={models} cmActions={cmActions} />
+            ) : (
+              <div className="alert alert-warn" style={{ marginTop: 8 }}>
+                <Ic d={D.shield} size={14} />
+                Corrective Maintenance is restricted to administrators.
+              </div>
+            )
           )}
         </main>
 
@@ -415,6 +426,8 @@ function UsersModal({ users, session, requests, reload, onError, onClose }) {
   const [tab, setTab] = useState("users");
   const [add, setAdd] = useState(false);
   const [pw, setPw]   = useState(null);
+  const [edit, setEdit] = useState(null);
+  const [ef, setEf]   = useState({ name: "", username: "", role: "user" });
   const [f, setF]     = useState({ name: "", username: "", password: "", role: "user" });
   const [np, setNp]   = useState("");
   const [err, setErr] = useState("");
@@ -488,6 +501,10 @@ function UsersModal({ users, session, requests, reload, onError, onClose }) {
             <span className={"badge " + (x.role === "admin" ? "badge-gold" : "badge-green")}>{x.role}</span>
             {!x.isActive && <span className="badge badge-gray">Pending</span>}
             {x.username === session.username && <span className="badge badge-gray">You</span>}
+            <button className="btn-ghost btn-sm"
+                    onClick={() => { setEdit(x); setEf({ name: x.name, username: x.username, role: x.role }); setErr(""); }}>
+              <Ic d={D.pencil} size={12} /> Edit
+            </button>
             <button className="btn-ghost btn-sm" onClick={() => { setPw(x); setNp(""); setErr(""); }}>
               <Ic d={D.key} size={12} /> Password
             </button>
@@ -520,6 +537,46 @@ function UsersModal({ users, session, requests, reload, onError, onClose }) {
               <option value="user">User</option>
               <option value="admin">Admin</option>
             </select></div>
+        </Modal>
+      )}
+
+      {edit && (
+        <Modal title={`Edit Account — ${edit.name}`} onClose={() => setEdit(null)}
+          footer={<>
+            <button className="btn-ghost" onClick={() => setEdit(null)}>Cancel</button>
+            <button className="btn-primary" onClick={async () => {
+              setErr("");
+              if (!ef.name.trim() || !ef.username.trim()) { setErr("Name and username are required."); return; }
+              if (!/^[a-zA-Z0-9._-]+$/.test(ef.username.trim())) {
+                setErr("Username may contain letters, numbers, dot, dash and underscore only."); return;
+              }
+              try { await api.updateProfile(edit.id, ef); await reload(); setEdit(null); }
+              catch (e) { setErr(friendlyError(e)); }
+            }}>Save Changes</button>
+          </>}>
+          {err && <div className="alert alert-error"><Ic d={D.close} size={13} />{err}</div>}
+          <div className="field"><label>Full Name</label>
+            <input value={ef.name} onChange={e => setEf({ ...ef, name: e.target.value })} autoFocus /></div>
+          <div className="field"><label>Username</label>
+            <input value={ef.username} onChange={e => setEf({ ...ef, username: e.target.value })}
+                   style={{ fontFamily: "var(--mono)" }} /></div>
+          <div className="field"><label>Role</label>
+            <select value={ef.role} onChange={e => setEf({ ...ef, role: e.target.value })}
+                    disabled={edit.username === session.username}>
+              <option value="user">User</option>
+              <option value="admin">Admin</option>
+            </select>
+            {edit.username === session.username && (
+              <p style={{ fontSize: 11, color: "var(--text3)", marginTop: 5 }}>
+                You cannot change your own role.
+              </p>
+            )}
+          </div>
+          <div className="alert" style={{ background: "var(--surface2)", border: "1px solid var(--border)", color: "var(--text2)", fontSize: 12, marginBottom: 0 }}>
+            <Ic d={D.shield} size={13} />
+            The new username takes effect immediately and the password stays the same.
+            Existing records keep showing the name of whoever created them.
+          </div>
         </Modal>
       )}
 

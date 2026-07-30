@@ -40,8 +40,20 @@ export const nameOf = (id) =>
  * Throws an Error with a ready-to-display message on failure.
  */
 export async function signIn(username, password) {
+  const uname = String(username).trim().toLowerCase();
+
+  // Resolve the username to the address the account actually signs in with.
+  // They differ whenever an admin has renamed the account, so we never assume
+  // the address matches the current username.
+  let loginEmail = emailFor(uname);
+  try {
+    const { data: p } = await supabase
+      .from("profiles").select("auth_email").eq("username", uname).maybeSingle();
+    if (p?.auth_email) loginEmail = p.auth_email;
+  } catch { /* fall back to the derived address */ }
+
   const { data, error } = await supabase.auth.signInWithPassword({
-    email: emailFor(username),
+    email: loginEmail,
     password,
   });
   if (error) throw error;
@@ -218,6 +230,37 @@ export async function setProfileActive(id, isActive) {
 
 export async function setProfileRole(id, role) {
   const { error } = await supabase.from("profiles").update({ role }).eq("id", id);
+  if (error) throw error;
+}
+
+/**
+ * Edit an account from User Management (admin only): display name, username
+ * and role.
+ *
+ * Renaming works end to end: signIn() resolves a username to the stored
+ * auth_email before authenticating, so the person signs in with their NEW
+ * username straight away and their password is untouched.
+ */
+export async function updateProfile(id, { name, username, role }) {
+  const patch = {};
+
+  if (username !== undefined) {
+    const uname = String(username).trim().toLowerCase();
+    if (!uname) throw new Error("Username is required.");
+    if (!/^[a-zA-Z0-9._-]+$/.test(uname))
+      throw new Error("Username may contain letters, numbers, dot, dash and underscore only.");
+
+    const { data: clash } = await supabase
+      .from("profiles").select("id").eq("username", uname).maybeSingle();
+    if (clash && clash.id !== id) throw new Error("That username already exists.");
+    patch.username = uname;
+  }
+
+  if (name !== undefined) patch.full_name = String(name).trim();
+  if (role !== undefined) patch.role = role;
+  if (!Object.keys(patch).length) return;
+
+  const { error } = await supabase.from("profiles").update(patch).eq("id", id);
   if (error) throw error;
 }
 
@@ -426,6 +469,7 @@ function recordRow(r) {
       entry_date: orNull(r.entryDate),
       exit_date: orNull(r.exitDate),
       exit_by: idOf(r.exitBy),
+      outgoing_at: orNull(r.outgoingAt),
       notes: r.notes || [],
     };
   }
@@ -503,6 +547,7 @@ function recordFromRow(row, devices) {
       entryDate: row.entry_date || row.created_at,
       exitDate: row.exit_date || "",
       exitBy: row.exit_by ? nameOf(row.exit_by) : "",
+      outgoingAt: row.outgoing_at || "",
       notes: row.notes || [],
       createdBy: nameOf(row.created_by),
       createdAt: row.created_at,
