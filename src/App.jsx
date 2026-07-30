@@ -64,6 +64,10 @@ export default function App() {
   sessionRef.current = session;
   const reloadTimer = useRef(null);
 
+  // Signature of the last payload we applied, so polling can skip the state
+  // update (and the re-render) when the server has nothing new.
+  const lastSig = useRef("");
+
   const reload = useCallback(async () => {
     if (!sessionRef.current) return;
     // Never overwrite local edits that are still being saved — wait until the
@@ -75,10 +79,17 @@ export default function App() {
       return;
     }
     try {
-      setUsersState(await api.loadUsers());
+      const users = await api.loadUsers();
       const [lists, tpls, recs, reqs] = await Promise.all([
         api.loadLists(), api.loadTemplates(), api.loadRecords(), api.loadRequests(),
       ]);
+
+      // Nothing new? Leave the screen completely untouched.
+      const sig = JSON.stringify([users, lists, tpls, recs, reqs]);
+      if (sig === lastSig.current) { setError(""); return; }
+      lastSig.current = sig;
+
+      setUsersState(users);
       resetDtypes(lists.dtypes);
       resetModels(lists.models);
       resetActions(lists.cmActions);
@@ -100,16 +111,46 @@ export default function App() {
     })();
   }, []);
 
-  // Load once signed in, then stay live
+  /**
+   * Load once signed in, then keep the screen fresh three ways, so new work
+   * from another workstation shows up without anybody pressing refresh:
+   *
+   *  1. Realtime push — instant, but rides a WebSocket that some hospital
+   *     networks block.
+   *  2. Polling every 20s — the safety net when the socket is unavailable.
+   *     Paused while the tab is hidden so it costs nothing in the background.
+   *  3. On regaining focus — an immediate catch-up when you come back to the
+   *     tab or wake the laptop.
+   */
   useEffect(() => {
     if (!session) return;
     let stop = () => {};
-    (async () => { await reload(); stop = api.subscribeAll(reload); })();
-    return () => stop();
+    let poll = null;
+
+    const tick = () => { if (!document.hidden) reload(); };
+    const onVisible = () => { if (!document.hidden) reload(); };
+
+    (async () => {
+      await reload();
+      stop = api.subscribeAll(reload);
+      poll = setInterval(tick, 20000);
+      document.addEventListener("visibilitychange", onVisible);
+      window.addEventListener("focus", onVisible);
+      window.addEventListener("online", onVisible);
+    })();
+
+    return () => {
+      stop();
+      clearInterval(poll);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onVisible);
+      window.removeEventListener("online", onVisible);
+    };
   }, [session, reload]);
 
   const logout = async () => {
     try { await api.signOut(); } catch {}
+    lastSig.current = "";
     setSession(null); setModule(null);
     resetRecords([]); resetTemplates([]); setUsersState([]); setRequests([]);
   };
