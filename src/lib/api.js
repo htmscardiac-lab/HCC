@@ -187,14 +187,31 @@ export async function changePassword(user, newPassword) {
   });
 
   if (error) {
-    // The function replies with a helpful message in the body; surface it when
-    // it is there, otherwise explain that the function still needs deploying.
+    // Read whatever the server said so the message names the real problem
+    // rather than always blaming deployment.
+    const status = error.context?.status;
     let detail = "";
-    try { detail = (await error.context?.json())?.error || ""; } catch {}
+    try {
+      const body = await error.context?.clone?.().text?.();
+      if (body) {
+        try { detail = JSON.parse(body).error || body; } catch { detail = body; }
+      }
+    } catch { /* body not readable */ }
+
+    if (status === 404) {
+      throw new Error(
+        "Function not found. In Supabase → Edge Functions, check a function named " +
+        "exactly ‘admin-reset-password’ is deployed (see PASSWORD_RESET.md)."
+      );
+    }
+    if (status === 401 || status === 403) {
+      throw new Error(detail || "You are not allowed to reset other users' passwords.");
+    }
     throw new Error(
-      detail ||
-      "Password reset is not available yet. An administrator needs to deploy the " +
-      "‘admin-reset-password’ function in Supabase (see PASSWORD_RESET.md)."
+      detail
+        ? `Reset failed: ${detail}`
+        : `Reset failed${status ? ` (HTTP ${status})` : ""}. ` +
+          "Check the function logs in Supabase → Edge Functions."
     );
   }
   if (res?.error) throw new Error(res.error);
@@ -468,6 +485,24 @@ export async function syncTemplates(prev, next) {
 
 const orNull = (v) => (v === "" || v === undefined ? null : v);
 
+/**
+ * Normalise a timestamp before it is stored.
+ *
+ * The date-time picker hands back a naive local string ("2026-08-02T12:46:00")
+ * with no timezone, while everything generated in code is already UTC. Storing
+ * both as-is made a record look like it left before it arrived, because the
+ * naive value was read as UTC. Converting here keeps every stored timestamp a
+ * true instant, so comparisons and ordering are always correct.
+ */
+function toIso(v) {
+  if (!v) return null;
+  const s = String(v);
+  // Already carries a zone (…Z or ±hh:mm) — trust it
+  if (/(Z|[+-]\d{2}:?\d{2})$/.test(s)) return s;
+  const d = new Date(s);          // naive string is parsed as local time
+  return isNaN(d.getTime()) ? null : d.toISOString();
+}
+
 function recordRow(r) {
   const base = {
     id: r.id,
@@ -485,10 +520,10 @@ function recordRow(r) {
       ward: r.ward || "",
       phone: r.phone || "",
       status: orNull(r.status),
-      entry_date: orNull(r.entryDate),
-      exit_date: orNull(r.exitDate),
+      entry_date: toIso(r.entryDate),
+      exit_date: toIso(r.exitDate),
       exit_by: idOf(r.exitBy),
-      outgoing_at: orNull(r.outgoingAt),
+      outgoing_at: toIso(r.outgoingAt),
       notes: r.notes || [],
     };
   }

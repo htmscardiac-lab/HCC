@@ -370,7 +370,10 @@ function IncomingSection({ setRecords, session, deviceTypes }) {
       id: uid(), module: "HCC",
       mrn: mrn.trim(), patientName: name, patientType: ptype,
       ward: ptype === "inpatient" ? ward : "", phone,
-      entryDate: edate || ts(), status: "in_process",
+      // The picker returns a naive local string; store a true instant so it can
+      // never be misread as UTC and appear later than the exit time.
+      entryDate: edate ? new Date(edate).toISOString() : ts(),
+      status: "in_process",
       createdBy: session.username, createdAt: ts(),
       devices: filled.map(d => ({
         ...d, condition: "", checklist: null,
@@ -692,7 +695,10 @@ function OutgoingSection({ records, setRecords, session, deviceTypes }) {
     const s = q.toLowerCase();
     return r.mrn.toLowerCase().includes(s) || (r.patientName || "").toLowerCase().includes(s)
         || r.devices.some(d => d.htmSn.toLowerCase().includes(s));
-  });
+  })
+  // Longest waiting first, so anything overdue for collection is at the top.
+  .slice().sort((a, b) =>
+    new Date(a.outgoingAt || a.entryDate || 0) - new Date(b.outgoingAt || b.entryDate || 0));
 
   const toggle = (rid, did, field) => {
     setRecords(rs => rs.map(r => r.id !== rid ? r : {
@@ -833,7 +839,11 @@ function ArchiveSection({ records, setRecords, session, deviceTypes }) {
     const s = q.toLowerCase();
     return r.mrn.toLowerCase().includes(s) || (r.patientName || "").toLowerCase().includes(s)
         || r.devices.some(d => d.htmSn.toLowerCase().includes(s) || d.deviceType.toLowerCase().includes(s));
-  });
+  })
+  // Most recently archived first — a record archived today belongs at the top
+  // even if it was registered weeks ago.
+  .slice().sort((a, b) =>
+    new Date(b.exitDate || b.entryDate || 0) - new Date(a.exitDate || a.entryDate || 0));
 
   const exportCsv = () => {
     const head = ["MRN", "Patient Name", "Type", "Ward", "Phone", "Entry Date", "Exit Date",
