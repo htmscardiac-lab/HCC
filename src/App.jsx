@@ -398,6 +398,7 @@ function Login({ onLogin }) {
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
   const [signup, setSignup] = useState(false);
+  const [forgot, setForgot] = useState(false);
 
   const go = async () => {
     if (busy) return;
@@ -445,7 +446,17 @@ function Login({ onLogin }) {
           Sign In <Ic d={D.arrow} size={15} stroke="#fff" />
         </button>
 
-        <div style={{ textAlign: "center", marginTop: 18, paddingTop: 16, borderTop: "1px solid var(--border)" }}>
+        <div style={{ textAlign: "center", marginTop: 14 }}>
+          <button onClick={() => setForgot(true)} style={{
+            background: "none", border: "none", padding: 0,
+            color: "var(--text3)", fontSize: 12, fontWeight: 600,
+            textDecoration: "underline", cursor: "pointer"
+          }}>
+            Forgot your password?
+          </button>
+        </div>
+
+        <div style={{ textAlign: "center", marginTop: 14, paddingTop: 16, borderTop: "1px solid var(--border)" }}>
           <span style={{ fontSize: 12.5, color: "var(--text3)" }}>Don't have an account? </span>
           <button onClick={() => setSignup(true)} style={{
             background: "none", border: "none", padding: 0,
@@ -458,6 +469,31 @@ function Login({ onLogin }) {
       </div>
 
       {signup && <SignupModal onClose={() => setSignup(false)} onActivated={onLogin} />}
+
+      {forgot && (
+        <Modal title="Forgot Password" onClose={() => setForgot(false)}
+          footer={<button className="btn-primary" onClick={() => setForgot(false)}>Got it</button>}>
+          <div style={{ textAlign: "center", padding: "6px 4px 2px" }}>
+            <div style={{
+              width: 52, height: 52, borderRadius: "50%", background: "var(--gold-lt)",
+              border: "2px solid var(--gold-mid)", display: "flex", alignItems: "center",
+              justifyContent: "center", margin: "0 auto 16px"
+            }}>
+              <Ic d={D.key} size={24} stroke="var(--gold)" />
+            </div>
+            <div style={{ fontSize: 15, fontWeight: 800, color: "var(--green3)", marginBottom: 10 }}>
+              Ask an HTMS administrator to reset it
+            </div>
+            <p style={{ fontSize: 13, color: "var(--text2)", lineHeight: 1.65, maxWidth: 380, margin: "0 auto" }}>
+              Accounts here sign in with a username, not an email address, so there is no
+              reset link to send. An administrator can set a new password for you in
+              seconds from <strong>Users → Password</strong>.
+              <br /><br />
+              Once you are back in, change it to something only you know from the same screen.
+            </p>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }
@@ -622,18 +658,35 @@ function UsersModal({ users, session, requests, reload, onError, onClose }) {
       )}
 
       {pw && (
-        <Modal title={`Change Password — ${pw.name}`} onClose={() => setPw(null)}
+        <Modal title={(pw.username === session.username ? "Change My Password" : `Reset Password — ${pw.name}`)}
+          onClose={() => setPw(null)}
           footer={<>
             <button className="btn-ghost" onClick={() => setPw(null)}>Cancel</button>
             <button className="btn-primary" onClick={async () => {
-              if (!np.trim()) return;
-              try { await api.changePassword(pw, np); setPw(null); }
+              setErr("");
+              if (np.trim().length < 6) { setErr("Password must be at least 6 characters."); return; }
+              try { await api.changePassword(pw, np); setPw(null); setNp(""); }
               catch (e) { setErr(friendlyError(e)); }
-            }}>Update Password</button>
+            }}>
+              {pw.username === session.username ? "Update Password" : "Reset Password"}
+            </button>
           </>}>
           {err && <div className="alert alert-error"><Ic d={D.close} size={13} />{err}</div>}
-          <div className="field"><label>New Password</label>
-            <input type="password" value={np} onChange={e => setNp(e.target.value)} autoFocus placeholder="New password" /></div>
+
+          {pw.username !== session.username && (
+            <div className="alert" style={{ background: "var(--surface2)", border: "1px solid var(--border)", color: "var(--text2)", fontSize: 12 }}>
+              <Ic d={D.key} size={13} />
+              Set a temporary password for <strong style={{ fontFamily: "var(--mono)" }}>@{pw.username}</strong>,
+              then tell them to sign in and change it from Users → Password.
+            </div>
+          )}
+
+          <div className="field" style={{ marginBottom: 0 }}>
+            <label>New Password</label>
+            <input type="password" value={np} onChange={e => setNp(e.target.value)} autoFocus
+                   placeholder="At least 6 characters"
+                   onKeyDown={e => { if (e.key === "Enter") e.preventDefault(); }} />
+          </div>
         </Modal>
       )}
     </>

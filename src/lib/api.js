@@ -164,21 +164,40 @@ export async function createUser({ name, username, password, role }) {
 /**
  * Change a password.
  *
- * Supabase only lets an account change its own password from the browser —
- * resetting somebody else's needs a service-role key, which must never ship
- * inside the app.
+ * Your own password is changed directly. Resetting somebody else's needs the
+ * service-role key, which must never ship inside the app — so that goes
+ * through the admin-reset-password Edge Function, which re-checks on the
+ * server that the caller really is an active admin.
  */
 export async function changePassword(user, newPassword) {
+  if (String(newPassword).length < 6)
+    throw new Error("Password should be at least 6 characters.");
+
   const { data } = await supabase.auth.getUser();
-  if (!data?.user || data.user.id !== user.id) {
+  const isSelf = data?.user && data.user.id === user.id;
+
+  if (isSelf) {
+    const { error } = await supabase.auth.updateUser({ password: newPassword });
+    if (error) throw error;
+    return;
+  }
+
+  const { data: res, error } = await supabase.functions.invoke("admin-reset-password", {
+    body: { userId: user.id, newPassword },
+  });
+
+  if (error) {
+    // The function replies with a helpful message in the body; surface it when
+    // it is there, otherwise explain that the function still needs deploying.
+    let detail = "";
+    try { detail = (await error.context?.json())?.error || ""; } catch {}
     throw new Error(
-      "For security, only the account holder can change their own password. " +
-      "Ask them to sign in and change it, or remove the account and create it again."
+      detail ||
+      "Password reset is not available yet. An administrator needs to deploy the " +
+      "‘admin-reset-password’ function in Supabase (see PASSWORD_RESET.md)."
     );
   }
-  if (String(newPassword).length < 6) throw new Error("Password should be at least 6 characters.");
-  const { error } = await supabase.auth.updateUser({ password: newPassword });
-  if (error) throw error;
+  if (res?.error) throw new Error(res.error);
 }
 
 // ── Users / requests administration ────────────────────────────────────
