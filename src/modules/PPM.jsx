@@ -328,9 +328,21 @@ function InlineChecklist({ record }) {
 }
 
 // Shared read-only checklist viewer (also used by HCC)
-export function ChecklistViewer({ record, onClose }) {
+export function ChecklistViewer({ record, onClose, revisionOf = null }) {
+  const [showRev, setShowRev] = useState(null);
   const cl = record.checklist;
   if (!cl) return null;
+
+  // Viewing an older version of the same inspection
+  if (showRev) {
+    return (
+      <ChecklistViewer
+        record={{ ...record, checklist: showRev.cl }}
+        revisionOf={{ index: showRev.index, total: (cl.revisions || []).length }}
+        onClose={() => setShowRev(null)}
+      />
+    );
+  }
   // Older records (saved before the fix) may not carry the step definitions.
   // Fall back to reconstructing rows from the answers so their values still show.
   let steps = cl.stepsSnapshot || [];
@@ -343,8 +355,29 @@ export function ChecklistViewer({ record, onClose }) {
   }
 
   return (
-    <Modal title={`Checklist — ${record.htmSn || ""}`} onClose={onClose} wide
-      footer={<button className="btn-ghost" onClick={onClose}>Close</button>}>
+    <Modal
+      title={revisionOf
+        ? `Checklist v${revisionOf.index} (earlier version) — ${record.htmSn || ""}`
+        : `Checklist — ${record.htmSn || ""}`}
+      onClose={onClose} wide
+      footer={<button className="btn-ghost" onClick={onClose}>
+        {revisionOf ? "Back" : "Close"}
+      </button>}>
+
+      {revisionOf && (
+        <div className="alert" style={{ background: "var(--surface2)", border: "1px solid var(--border)", color: "var(--text2)", fontSize: 12 }}>
+          <Ic d={D.clock} size={13} />
+          This is a superseded version, kept for the record. Close to return to the current result.
+        </div>
+      )}
+
+      {!revisionOf && cl.editedBy && (
+        <div className="alert" style={{ background: "var(--purple-lt)", border: "1px solid #d9b3e6", color: "var(--purple)", fontSize: 12 }}>
+          <Ic d={D.pencil} size={13} />
+          Edited by <strong>{cl.editedBy}</strong> on {fmt(cl.editedAt)} — earlier versions are listed below.
+        </div>
+      )}
+
       <div style={{
         background: cl.summary.overall === "pass" ? "var(--green-lt)" : "var(--red-lt)",
         border: "1px solid " + (cl.summary.overall === "pass" ? "var(--green-mid)" : "#f0c0bb"),
@@ -415,6 +448,36 @@ export function ChecklistViewer({ record, onClose }) {
           );
         })}
       </div>
+
+      {/* Earlier versions of this inspection are kept, never overwritten */}
+      {(cl.revisions || []).length > 0 && (
+        <div style={{ marginTop: 18, borderTop: "1px solid var(--border)", paddingTop: 14 }}>
+          <SL>Previous versions ({cl.revisions.length})</SL>
+          <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
+            {cl.revisions.slice().reverse().map((rev, i) => {
+              const idx = cl.revisions.length - i;
+              return (
+                <div key={i} style={{
+                  background: "var(--surface2)", border: "1px solid var(--border)",
+                  borderRadius: 7, padding: "8px 12px", display: "flex",
+                  alignItems: "center", gap: 10, flexWrap: "wrap"
+                }}>
+                  <span className="badge badge-gray">v{idx}</span>
+                  <span style={{ flex: 1, minWidth: 130, fontSize: 12.5, color: "var(--text2)" }}>
+                    {fmt(rev.completedAt)}
+                  </span>
+                  <span className={"badge " + (rev.summary?.overall === "pass" ? "badge-green" : "badge-red")}>
+                    {rev.summary?.overall === "pass" ? "Pass" : "Fail"}
+                  </span>
+                  <button className="btn-ghost btn-sm" onClick={() => setShowRev({ cl: rev, index: idx })}>
+                    <Ic d={D.list} size={11} /> View
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </Modal>
   );
 }

@@ -11,6 +11,61 @@ const OUTGOING_OVERDUE_H = 24; // Outgoing: warn after one day
 const outgoingHours = (r) => hoursAgo(r.outgoingAt || r.entryDate);
 const isOutgoingOverdue = (r) => outgoingHours(r) > OUTGOING_OVERDUE_H;
 
+/**
+ * Move a record back to an earlier stage (admin only).
+ *
+ * Nothing is erased: inspection results, checklists and notes all stay. An
+ * automatic note records who sent it back and when, so the history stays
+ * honest. Stamps that no longer apply to the new stage are cleared, otherwise
+ * the "waiting since" and "archived at" times would be wrong.
+ */
+function sendBack(setRecords, record, target, session) {
+  setRecords(rs => rs.map(r => {
+    if (r.id !== record.id) return r;
+    const from = r.status === "archived" ? "Archive"
+               : r.status === "outgoing" ? "Outgoing" : "In Process";
+    const to   = target === "in_process" ? "In Process" : "Outgoing";
+
+    const next = {
+      ...r,
+      status: target,
+      notes: [...(r.notes || []), {
+        id: uid(),
+        text: `Returned from ${from} to ${to}.`,
+        by: session.username,
+        at: ts(),
+        system: true,
+      }],
+    };
+    // Leaving Archive means it is no longer completed
+    if (target !== "archived") { next.exitDate = ""; next.exitBy = ""; }
+    // Going back to In Process means it is no longer waiting for collection
+    if (target === "in_process") next.outgoingAt = "";
+    // Arriving in Outgoing restarts the collection clock
+    if (target === "outgoing") next.outgoingAt = ts();
+    return next;
+  }));
+}
+
+/**
+ * Replace a device's checklist while keeping every earlier result.
+ *
+ * The previous version is pushed onto a revisions list inside the checklist
+ * itself, and the new one is stamped with who edited it. Nothing is deleted,
+ * so the original readings remain auditable.
+ */
+function reviseChecklist(prevChecklist, result, template, session) {
+  const revisions = prevChecklist
+    ? [...(prevChecklist.revisions || []), { ...prevChecklist, revisions: undefined }]
+    : [];
+  return {
+    ...result,
+    stepsSnapshot: result.stepsSnapshot || template?.steps || [],
+    revisions,
+    ...(prevChecklist ? { editedBy: session.username, editedAt: ts() } : {}),
+  };
+}
+
 /** Human "2h 15m" / "1d 3h" from a number of hours. */
 const durationText = (h) => {
   if (h >= 24) {
@@ -323,7 +378,7 @@ export default function HCC({ records, setRecords, session, deviceTypes, templat
 
       {tab === "incoming"   && <IncomingSection   setRecords={setRecords} session={session} deviceTypes={deviceTypes} />}
       {tab === "in_process" && <InProcessSection  records={inProcess} setRecords={setRecords} session={session} templates={templates} deviceTypes={deviceTypes} />}
-      {tab === "outgoing"   && <OutgoingSection   records={outgoing}  setRecords={setRecords} session={session} deviceTypes={deviceTypes} />}
+      {tab === "outgoing"   && <OutgoingSection   records={outgoing}  setRecords={setRecords} session={session} deviceTypes={deviceTypes} templates={templates} />}
       {tab === "archive"    && <ArchiveSection    records={archived}  setRecords={setRecords} session={session} deviceTypes={deviceTypes} />}
     </div>
   );
@@ -523,7 +578,8 @@ function InProcessSection({ records, setRecords, session, templates, deviceTypes
         devices: r.devices.map(d => d.id !== device.id ? d : {
           ...d,
           condition,
-          checklist: { ...result, stepsSnapshot: template.steps },
+          // Re-running keeps the earlier result as a revision
+          checklist: reviseChecklist(d.checklist, result, template, session),
           inspectionDate: ts(),
           inspectedBy: session.username
         })
@@ -611,6 +667,9 @@ function InProcessSection({ records, setRecords, session, templates, deviceTypes
                   {d.condition ? (
                     <>
                       <CB c={d.condition} />
+                      {d.checklist?.editedBy && (
+                        <span className="badge badge-purple" title={`Edited by ${d.checklist.editedBy}`}>Edited</span>
+                      )}
                       {d.checklist && (
                         <button className="btn-ghost btn-sm" onClick={() => setViewCl({ ...d, htmSn: d.htmSn })}>
                           <Ic d={D.list} size={12} /> View Checklist
@@ -671,11 +730,41 @@ function InProcessSection({ records, setRecords, session, templates, deviceTypes
 }
 
 // ── Outgoing ───────────────────────────────────────────────────────────
-function OutgoingSection({ records, setRecords, session, deviceTypes }) {
+function OutgoingSection({ records, setRecords, session, deviceTypes, templates }) {
   const [q, setQ] = useState("");
   const [viewCl, setViewCl] = useState(null);
   const [edit, setEdit] = useState(null);
   const [notesId, setNotesId] = useState(null);
+  const [runner, setRunner] = useState(null);   // admin re-running a checklist
+  const isAdmin = session.role === "admin";
+
+  const findTemplate = (deviceType) =>
+    templates.find(t => t.module === "HCC" && t.deviceType === deviceType) || null;
+
+  const startChecklist = (recordId, device) => {
+    const tpl = findTemplate(device.deviceType);
+    if (!tpl) {
+      window.alert(`No checklist template exists for "${device.deviceType}".`);
+      return;
+    }
+    setRunner({ recordId, device, template: tpl });
+  };
+
+  const handleChecklistSubmit = (result) => {
+    const { recordId, device, template } = runner;
+    const condition = result.summary.overall === "pass" ? "working" : "defective";
+    setRecords(rs => rs.map(r => r.id !== recordId ? r : {
+      ...r,
+      devices: r.devices.map(d => d.id !== device.id ? d : {
+        ...d,
+        condition,
+        checklist: reviseChecklist(d.checklist, result, template, session),
+        inspectionDate: ts(),
+        inspectedBy: session.username,
+      })
+    }));
+    setRunner(null);
+  };
   const saveEdit = (updated) =>
     setRecords(rs => rs.map(r => r.id === updated.id ? updated : r));
 
@@ -751,12 +840,18 @@ function OutgoingSection({ records, setRecords, session, deviceTypes }) {
                 <Ic d={D.text} size={13} /> Notes
                 {(r.notes || []).length > 0 && <span className="count-dot">{r.notes.length}</span>}
               </button>
-              {session.role === "admin" && (
+              {isAdmin && (
                 <button className="btn-ghost btn-sm" onClick={() => setEdit(r)}>
                   <Ic d={D.pencil} size={13} /> Edit
                 </button>
               )}
-              {session.role === "admin" && (
+              {isAdmin && (
+                <button className="btn-ghost btn-sm" title="Send back so the engineer can correct it"
+                        onClick={() => { if (window.confirm("Send this record back to In Process?")) sendBack(setRecords, r, "in_process", session); }}>
+                  <Ic d={D.arrowL} size={13} /> Back to In Process
+                </button>
+              )}
+              {isAdmin && (
                 <button className="btn-danger btn-sm"
                         onClick={() => { if (window.confirm("Delete this record?")) setRecords(rs => rs.filter(x => x.id !== r.id)); }}>
                   <Ic d={D.trash} size={13} /> Delete
@@ -779,9 +874,16 @@ function OutgoingSection({ records, setRecords, session, deviceTypes }) {
                 <div key={d.id} className="device-row">
                   <DI d={d} />
                   {d.condition && <CB c={d.condition} />}
+                  {d.checklist?.editedBy && <span className="badge badge-purple" title={`Edited by ${d.checklist.editedBy}`}>Edited</span>}
                   {d.checklist && (
                     <button className="btn-ghost btn-sm" onClick={() => setViewCl(d)}>
                       <Ic d={D.list} size={12} /> Checklist
+                    </button>
+                  )}
+                  {isAdmin && (
+                    <button className="btn-ghost btn-sm" title="Correct the readings — the previous result is kept"
+                            onClick={() => startChecklist(r.id, d)}>
+                      <Ic d={D.pencil} size={12} /> Edit Checklist
                     </button>
                   )}
                   <label className="checkbox-custom">
@@ -798,6 +900,18 @@ function OutgoingSection({ records, setRecords, session, deviceTypes }) {
           </div>
         );
       })}
+
+      {runner && (
+        <ChecklistRunner
+          template={runner.template}
+          context={{
+            title: `Edit Inspection — ${runner.device.htmSn}`,
+            subtitle: `${runner.device.deviceType}${runner.device.model ? " · " + runner.device.model : ""} — the previous result is kept as a revision`
+          }}
+          onSubmit={handleChecklistSubmit}
+          onCancel={() => setRunner(null)}
+        />
+      )}
 
       {viewCl && <ChecklistViewer record={viewCl} onClose={() => setViewCl(null)} />}
       {edit && (
@@ -908,6 +1022,18 @@ function ArchiveSection({ records, setRecords, session, deviceTypes }) {
             {session.role === "admin" && (
               <button className="btn-ghost btn-sm" onClick={() => setEdit(r)}>
                 <Ic d={D.pencil} size={13} /> Edit
+              </button>
+            )}
+            {session.role === "admin" && (
+              <button className="btn-ghost btn-sm" title="Reopen for correction"
+                      onClick={() => { if (window.confirm("Send this record back to Outgoing?")) sendBack(setRecords, r, "outgoing", session); }}>
+                <Ic d={D.arrowL} size={13} /> To Outgoing
+              </button>
+            )}
+            {session.role === "admin" && (
+              <button className="btn-ghost btn-sm" title="Reopen for re-inspection"
+                      onClick={() => { if (window.confirm("Send this record back to In Process?")) sendBack(setRecords, r, "in_process", session); }}>
+                <Ic d={D.arrowL} size={13} /> To In Process
               </button>
             )}
             {session.role === "admin" && (

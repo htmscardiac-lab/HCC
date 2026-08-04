@@ -165,6 +165,29 @@ export default function App() {
   // Corrective Maintenance is admin-only — never render it for anyone else,
   // even if the module was somehow selected.
   const module = (rawModule === "CM" && session.role !== "admin") ? null : rawModule;
+  const pendingCount = requests.filter(r => r.status === "pending").length;
+
+  // The admin tools are the same wherever they are opened from, so they are
+  // built once here and rendered on the home screen as well as inside a module.
+  const adminModals = (
+    <>
+      {showUsers && (
+        <UsersModal users={users} session={session} reload={reload} onError={onError}
+                    requests={requests} onClose={() => setShowUsers(false)} />
+      )}
+      {showBuilder && (
+        <ChecklistBuilder templates={templates} setTemplates={setTemplates}
+                          deviceTypes={dtypes} models={models}
+                          session={session} onClose={() => setShowBuilder(false)} />
+      )}
+      {showLists && (
+        <ListsManager deviceTypes={dtypes} setDeviceTypes={setDtypes}
+                      models={models} setModels={setModels}
+                      cmActions={cmActions} setCmActions={setCmActions}
+                      onClose={() => setShowLists(false)} />
+      )}
+    </>
+  );
 
   if (!module) {
     const stats = {
@@ -177,7 +200,12 @@ export default function App() {
         <style>{STYLE}</style>
         {error && <ErrorBar message={error} onClose={() => setError("")} />}
         <SaveStatus />
-        <Launcher session={session} onPick={setModule} onLogout={logout} stats={stats} />
+        <Launcher session={session} onPick={setModule} onLogout={logout} stats={stats}
+                  onUsers={() => setShowUsers(true)}
+                  onBuilder={() => setShowBuilder(true)}
+                  onLists={() => setShowLists(true)}
+                  pendingCount={pendingCount} />
+        {adminModals}
       </>
     );
   }
@@ -199,7 +227,7 @@ export default function App() {
           onUsers={() => setShowUsers(true)}
           onBuilder={() => setShowBuilder(true)}
           onLists={() => setShowLists(true)}
-          pendingCount={requests.filter(r => r.status === "pending").length}
+          pendingCount={pendingCount}
         />
 
         <main style={{ flex: 1, padding: "20px 24px 40px", maxWidth: 1400, margin: "0 auto", width: "100%" }}>
@@ -225,25 +253,11 @@ export default function App() {
         </main>
 
         <footer style={{ padding: "14px 24px", textAlign: "center", fontSize: 11, color: "var(--text3)", borderTop: "1px solid var(--border)" }}>
-          HTMS Unified Maintenance Platform · v{VERSION} · MNGHA
+          Cardiac Lab Platform · v{VERSION} · MNGHA
         </footer>
       </div>
 
-      {showUsers && (
-        <UsersModal users={users} session={session} reload={reload} onError={onError}
-                    requests={requests} onClose={() => setShowUsers(false)} />
-      )}
-      {showBuilder && (
-        <ChecklistBuilder templates={templates} setTemplates={setTemplates}
-                          deviceTypes={dtypes} models={models}
-                          session={session} onClose={() => setShowBuilder(false)} />
-      )}
-      {showLists && (
-        <ListsManager deviceTypes={dtypes} setDeviceTypes={setDtypes}
-                      models={models} setModels={setModels}
-                      cmActions={cmActions} setCmActions={setCmActions}
-                      onClose={() => setShowLists(false)} />
-      )}
+      {adminModals}
     </>
   );
 }
@@ -421,7 +435,7 @@ function Login({ onLogin }) {
             <img src={MNGHA_LOGO} alt="MNGHA" style={{ width: 62, height: 62, borderRadius: "50%", objectFit: "cover", border: "3px solid var(--green-mid)" }} />
             <img src={HTMS_LOGO} alt="HTMS" style={{ width: 62, height: 62, borderRadius: 11, objectFit: "cover", border: "2px solid var(--border2)" }} />
           </div>
-          <h1 style={{ fontSize: 19, fontWeight: 800, color: "var(--green3)", marginBottom: 4 }}>HTMS Platform</h1>
+          <h1 style={{ fontSize: 19, fontWeight: 800, color: "var(--green3)", marginBottom: 4 }}>Cardiac Lab Platform</h1>
           <div style={{ fontSize: 12.5, fontWeight: 700, color: "var(--green)", marginBottom: 3 }}>
             Healthcare Technology Management Services
           </div>

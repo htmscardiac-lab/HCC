@@ -36,8 +36,10 @@ const MODULES = [
   },
 ];
 
-export default function Launcher({ session, onPick, onLogout, stats }) {
+export default function Launcher({ session, onPick, onLogout, stats,
+                                   onUsers, onBuilder, onLists, pendingCount = 0 }) {
   const modules = MODULES.filter(m => !m.adminOnly || session.role === "admin");
+  const isAdmin = session.role === "admin";
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", background: "var(--bg)" }}>
       {/* Header */}
@@ -45,7 +47,7 @@ export default function Launcher({ session, onPick, onLogout, stats }) {
         background: "var(--green3)", borderBottom: "3px solid var(--gold)",
         padding: "0 20px", height: 64, display: "flex", alignItems: "center",
         justifyContent: "space-between", flexShrink: 0, boxShadow: "0 2px 12px rgba(0,0,0,.18)"
-      }}>
+      }} className="app-header">
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <img src={MNGHA_LOGO} alt="MNGHA" style={{ width: 46, height: 46, borderRadius: "50%", objectFit: "cover", border: "2px solid var(--gold)", background: "#fff", flexShrink: 0 }} />
           <div>
@@ -56,10 +58,35 @@ export default function Launcher({ session, onPick, onLogout, stats }) {
           <img src={HTMS_LOGO} alt="HTMS" style={{ width: 42, height: 42, borderRadius: 8, objectFit: "cover", border: "1px solid rgba(255,255,255,.2)", flexShrink: 0 }} />
           <div>
             <div style={{ color: "rgba(255,255,255,.9)", fontWeight: 700, fontSize: 13 }}>HTMS — Healthcare Technology Management Services</div>
-            <div style={{ color: "rgba(255,255,255,.45)", fontSize: 11, letterSpacing: ".04em" }}>Unified Maintenance Platform</div>
+            <div style={{ color: "rgba(255,255,255,.45)", fontSize: 11, letterSpacing: ".04em" }}>Cardiac Lab Platform</div>
           </div>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <div className="header-actions" style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          {isAdmin && (
+            <>
+              <button onClick={onBuilder} title="Checklist Builder" style={hBtn}>
+                <Ic d={D.list} size={14} stroke="#fff" />
+                <span style={{ fontSize: 12 }}>Checklists</span>
+              </button>
+              <button onClick={onLists} title="Manage dropdown lists" style={hBtn}>
+                <Ic d={D.chip} size={14} stroke="#fff" />
+                <span style={{ fontSize: 12 }}>Lists</span>
+              </button>
+              <button onClick={onUsers} title="User Management" style={{ ...hBtn, position: "relative" }}>
+                <Ic d={D.users} size={14} stroke="#fff" />
+                <span style={{ fontSize: 12 }}>Users</span>
+                {pendingCount > 0 && (
+                  <span style={{
+                    position: "absolute", top: -6, right: -6, minWidth: 18, height: 18,
+                    borderRadius: 10, background: "var(--gold)", color: "#fff",
+                    fontSize: 10.5, fontWeight: 800, display: "flex", alignItems: "center",
+                    justifyContent: "center", padding: "0 5px", border: "2px solid var(--green3)"
+                  }}>{pendingCount}</span>
+                )}
+              </button>
+              <div style={{ width: 1, height: 30, background: "rgba(255,255,255,.2)" }} />
+            </>
+          )}
           <div style={{ textAlign: "right" }}>
             <div style={{ color: "#fff", fontSize: 13, fontWeight: 600 }}>{session.name}</div>
             <div style={{ color: "rgba(255,255,255,.45)", fontSize: 11 }}>@{session.username}</div>
@@ -125,8 +152,14 @@ export default function Launcher({ session, onPick, onLogout, stats }) {
       </main>
 
       <footer style={{ padding: "16px 24px", textAlign: "center", fontSize: 11.5, color: "var(--text3)", borderTop: "1px solid var(--border)" }}>
-        HTMS Unified Maintenance Platform · v2.0.0 · Ministry of National Guard Health Affairs
+        Cardiac Lab Platform · v2.0.0 · Ministry of National Guard Health Affairs
       </footer>
     </div>
   );
 }
+
+const hBtn = {
+  background: "rgba(255,255,255,.1)", color: "#fff", border: "1px solid rgba(255,255,255,.2)",
+  borderRadius: 6, padding: "6px 11px", fontFamily: "var(--sans)", fontWeight: 600,
+  cursor: "pointer", display: "flex", alignItems: "center", gap: 5
+};
