@@ -439,9 +439,6 @@ function Login({ onLogin }) {
           <div style={{ fontSize: 12.5, fontWeight: 700, color: "var(--green)", marginBottom: 3 }}>
             Healthcare Technology Management Services
           </div>
-          <p style={{ color: "var(--text3)", fontSize: 11.5 }}>
-            Unified Maintenance System · <span style={{ fontFamily: "var(--mono)" }}>v{VERSION}</span>
-          </p>
         </div>
 
         {err && <div className="alert alert-error"><Ic d={D.close} size={13} />{err}</div>}

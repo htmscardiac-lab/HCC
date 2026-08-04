@@ -3,6 +3,7 @@ import { Ic, D, uid, ts, localTs, fmt, hoursAgo, Modal, Empty, SH, SL, SearchBar
 import BarcodeInput from "../components/BarcodeScanner.jsx";
 import ChecklistRunner from "../components/ChecklistRunner.jsx";
 import { ChecklistViewer } from "./PPM.jsx";
+import { exportHCCList } from "../lib/exportRecords.js";
 
 const OVERDUE_H = 2;           // In Process: warn after two hours
 const OUTGOING_OVERDUE_H = 24; // Outgoing: warn after one day
@@ -959,30 +960,6 @@ function ArchiveSection({ records, setRecords, session, deviceTypes }) {
   .slice().sort((a, b) =>
     new Date(b.exitDate || b.entryDate || 0) - new Date(a.exitDate || a.entryDate || 0));
 
-  const exportCsv = () => {
-    const head = ["MRN", "Patient Name", "Type", "Ward", "Phone", "Entry Date", "Exit Date",
-                  "HTM/SN", "Device Type", "Model", "Manufacturer", "Condition",
-                  "Checklist", "Pass", "Fail", "Return", "Report",
-                  "Created By", "Inspected By", "Inspection Date", "Completed By", "Notes"];
-    const notesText = (r) => (r.notes || [])
-      .map(n => `[${fmt(n.at)} — ${n.by}] ${n.text}`).join(" | ");
-    const rows = [];
-    list.forEach(r => r.devices.forEach(d => rows.push([
-      r.mrn, r.patientName, r.patientType, r.ward, r.phone, fmt(r.entryDate), fmt(r.exitDate),
-      d.htmSn, d.deviceType, d.model || "", d.manufacturer || "", d.condition,
-      d.checklist?.templateName || "", d.checklist?.summary?.passed ?? "", d.checklist?.summary?.failed ?? "",
-      d.returnChecked ? "Yes" : "No", d.reportChecked ? "Yes" : "No",
-      r.createdBy, d.inspectedBy, fmt(d.inspectionDate), r.exitBy, notesText(r)
-    ])));
-    const csv = [head, ...rows]
-      .map(row => row.map(c => `"${String(c ?? "").replace(/"/g, '""')}"`).join(","))
-      .join("\n");
-    const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = `HCC_Archive_${new Date().toISOString().slice(0,10)}.csv`;
-    a.click();
-  };
 
   return (
     <div>
@@ -995,9 +972,12 @@ function ArchiveSection({ records, setRecords, session, deviceTypes }) {
               <Ic d={D.trash} size={13} /> Delete All
             </button>
           )}
-          <button className="btn-gold btn-sm" onClick={exportCsv} disabled={list.length === 0}>
-            <Ic d={D.excel} size={13} stroke="#fff" /> Export to Excel
-          </button>
+          {session.role === "admin" && (
+            <button className="btn-gold btn-sm" onClick={() => exportHCCList(list, "HCC_Archive")}
+                    disabled={list.length === 0}>
+              <Ic d={D.excel} size={13} stroke="#fff" /> Export to Excel
+            </button>
+          )}
         </div>
       </div>
 

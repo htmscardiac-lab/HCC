@@ -21,10 +21,13 @@ export const localTs = () => {
          "T" + p(d.getHours()) + ":" + p(d.getMinutes()) + ":" + p(d.getSeconds());
 };
 
+// 12-hour clock with AM / PM — the department works in shifts, so "08:54"
+// alone is ambiguous. Renders as "02 Aug 2026, 08:54 AM".
 export const fmt = (iso) => {
   if (!iso) return "—";
   return new Date(iso).toLocaleString("en-GB", {
-    day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit"
+    day: "2-digit", month: "short", year: "numeric",
+    hour: "2-digit", minute: "2-digit", hour12: true
   });
 };
 

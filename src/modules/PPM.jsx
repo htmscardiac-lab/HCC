@@ -221,9 +221,11 @@ function PPMList({ records, setRecords, session, mode }) {
               <Ic d={D.trash} size={13} /> Delete All
             </button>
           )}
-          <button className="btn-gold btn-sm" onClick={() => exportPPMList(list, awaiting ? "PPM_Awaiting" : "PPM_History")} disabled={list.length === 0}>
-            <Ic d={D.excel} size={13} stroke="#fff" /> Export All to Excel
-          </button>
+          {session.role === "admin" && (
+            <button className="btn-gold btn-sm" onClick={() => exportPPMList(list, awaiting ? "PPM_Awaiting" : "PPM_History")} disabled={list.length === 0}>
+              <Ic d={D.excel} size={13} stroke="#fff" /> Export All to Excel
+            </button>
+          )}
         </div>
       </div>
       <div style={{ marginBottom: 16 }}>
@@ -248,9 +250,11 @@ function PPMList({ records, setRecords, session, mode }) {
               <button className="btn-ghost btn-sm" onClick={() => setView(r)}>
                 <Ic d={D.list} size={12} /> View Checklist
               </button>
-              <button className="btn-gold btn-sm" onClick={() => exportPPMRecord(r)}>
-                <Ic d={D.excel} size={12} stroke="#fff" /> Export Excel
-              </button>
+              {session.role === "admin" && (
+                <button className="btn-gold btn-sm" onClick={() => exportPPMRecord(r)}>
+                  <Ic d={D.excel} size={12} stroke="#fff" /> Export Excel
+                </button>
+              )}
               {session.role === "admin" && (awaiting ? (
                 <button className="btn-primary btn-sm" onClick={() => markLogged(r.id)}>
                   <Ic d={D.check} size={12} stroke="#fff" /> Mark Done → History

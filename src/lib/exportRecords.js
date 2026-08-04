@@ -123,6 +123,69 @@ export function exportPPMList(records, label = "PPM") {
   download(wb, `${safe(label)}_${new Date().toISOString().slice(0,10)}.xlsx`);
 }
 
+// ── HCC ─────────────────────────────────────────────────────────────────
+
+/**
+ * HCC records: a row per device, plus every checklist answer on its own sheet
+ * and the full note history. Nothing is summarised away — a reviewer can see
+ * exactly what was measured, not just that the device passed.
+ */
+export function exportHCCList(records, label = "HCC_Archive") {
+  const summary = [[
+    "MRN", "Patient Name", "Type", "Ward", "Phone",
+    "Entry Date", "Exit Date", "HTM/SN", "Device Type", "Model", "Manufacturer",
+    "Condition", "Checklist", "Passed", "Failed", "N/A",
+    "Return", "Report", "Created By", "Inspected By", "Inspection Date",
+    "Completed By", "Edited By", "Notes",
+  ]];
+  const detail = [[
+    "MRN", "HTM/SN", "Device Type", "#", "Checklist Item", "Value", "Result", "Note",
+  ]];
+  const noteRows = [["MRN", "#", "Note", "Written By", "Written At"]];
+
+  records.forEach(r => {
+    const notesText = (r.notes || [])
+      .map(n => `[${fmt(n.at)} — ${n.by}] ${n.text}`).join("  |  ");
+
+    (r.notes || []).forEach((n, i) =>
+      noteRows.push([r.mrn, i + 1, n.text, n.by, fmt(n.at)]));
+
+    (r.devices || []).forEach(d => {
+      const cl = d.checklist || {};
+      summary.push([
+        r.mrn, r.patientName, r.patientType, r.ward || "", r.phone || "",
+        fmt(r.entryDate), fmt(r.exitDate),
+        d.htmSn, d.deviceType, d.model || "", d.manufacturer || "",
+        d.condition || "",
+        cl.templateName || "",
+        cl.summary?.passed ?? "", cl.summary?.failed ?? "", cl.summary?.na ?? "",
+        d.returnChecked ? "Yes" : "No", d.reportChecked ? "Yes" : "No",
+        r.createdBy, d.inspectedBy || "", fmt(d.inspectionDate),
+        r.exitBy || "", cl.editedBy || "", notesText,
+      ]);
+
+      (cl.stepsSnapshot || []).forEach((s, i) => {
+        const { value, result } = answerCell(s, cl.answers?.[s.id]);
+        detail.push([
+          r.mrn, d.htmSn, d.deviceType, i + 1, s.label, value, result,
+          cl.answers?.[s.id]?.note || "",
+        ]);
+      });
+    });
+  });
+
+  const wb = XLSX.utils.book_new();
+  const ws1 = XLSX.utils.aoa_to_sheet(summary); ws1["!cols"] = autoWidth(summary);
+  const ws2 = XLSX.utils.aoa_to_sheet(detail);  ws2["!cols"] = autoWidth(detail);
+  XLSX.utils.book_append_sheet(wb, ws1, "Devices");
+  XLSX.utils.book_append_sheet(wb, ws2, "Checklist Detail");
+  if (noteRows.length > 1) {
+    const ws3 = XLSX.utils.aoa_to_sheet(noteRows); ws3["!cols"] = autoWidth(noteRows);
+    XLSX.utils.book_append_sheet(wb, ws3, "Notes");
+  }
+  download(wb, `${safe(label)}_${new Date().toISOString().slice(0,10)}.xlsx`);
+}
+
 // ── CM ──────────────────────────────────────────────────────────────────
 
 /** One CM work order as a detailed sheet: device block + problems + parts. */
