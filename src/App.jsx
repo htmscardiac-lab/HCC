@@ -63,6 +63,17 @@ export default function App() {
   const sessionRef = useRef(session);
   sessionRef.current = session;
   const reloadTimer = useRef(null);
+  const [kickedOut, setKickedOut] = useState("");
+
+  /** End the session immediately and explain why on the sign-in screen. */
+  const forceSignOut = useCallback(async (reason) => {
+    try { await api.signOut(); } catch {}
+    lastSig.current = "";
+    setKickedOut(reason);
+    setSession(null);
+    setModule(null);
+    resetRecords([]); resetTemplates([]); setUsersState([]); setRequests([]);
+  }, [resetRecords, resetTemplates]);
 
   // Signature of the last payload we applied, so polling can skip the state
   // update (and the re-render) when the server has nothing new.
@@ -80,6 +91,14 @@ export default function App() {
     }
     try {
       const users = await api.loadUsers();
+
+      // An administrator can suspend an account while its owner is still
+      // signed in. Every refresh re-checks, so access is withdrawn within
+      // seconds rather than waiting for them to sign out on their own.
+      const me = users.find(u => u.id === sessionRef.current.id);
+      if (me && !me.isActive) { forceSignOut("Your access has been suspended by an administrator."); return; }
+      if (!me) { forceSignOut("Your account is no longer available. Contact an administrator."); return; }
+
       const [lists, tpls, recs, reqs] = await Promise.all([
         api.loadLists(), api.loadTemplates(), api.loadRecords(), api.loadRequests(),
       ]);
@@ -98,7 +117,7 @@ export default function App() {
       setRequests(reqs);
       setError("");
     } catch (err) { onError(err); }
-  }, [onError, resetDtypes, resetModels, resetActions, resetTemplates, resetRecords]);
+  }, [onError, forceSignOut, resetDtypes, resetModels, resetActions, resetTemplates, resetRecords]);
 
   // Restore an existing sign-in on start-up
   useEffect(() => {
@@ -159,7 +178,10 @@ export default function App() {
   if (booting) return <><style>{STYLE}</style></>;
 
   if (!session) {
-    return <><style>{STYLE}</style><Login onLogin={setSession} /></>;
+    return <><style>{STYLE}</style>
+      <Login notice={kickedOut}
+             onLogin={(s) => { setKickedOut(""); setSession(s); }} />
+    </>;
   }
 
   // Corrective Maintenance is admin-only — never render it for anyone else,
@@ -406,7 +428,7 @@ const hBtn = {
 };
 
 // ── Login ──────────────────────────────────────────────────────────────
-function Login({ onLogin }) {
+function Login({ onLogin, notice = "" }) {
   const [u, setU] = useState("");
   const [p, setP] = useState("");
   const [err, setErr] = useState("");
@@ -441,6 +463,9 @@ function Login({ onLogin }) {
           </div>
         </div>
 
+        {notice && !err && (
+          <div className="alert alert-warn"><Ic d={D.shield} size={13} />{notice}</div>
+        )}
         {err && <div className="alert alert-error"><Ic d={D.close} size={13} />{err}</div>}
 
         <div className="field">
@@ -587,12 +612,25 @@ function UsersModal({ users, session, requests, reload, onError, onClose }) {
               <div style={{ fontSize: 12, color: "var(--text3)", fontFamily: "var(--mono)" }}>@{x.username}</div>
             </div>
             <span className={"badge " + (x.role === "admin" ? "badge-gold" : "badge-green")}>{x.role}</span>
-            {!x.isActive && <span className="badge badge-gray">Pending</span>}
+            {!x.isActive && <span className="badge badge-red">Suspended</span>}
             {x.username === session.username && <span className="badge badge-gray">You</span>}
             <button className="btn-ghost btn-sm"
                     onClick={() => { setEdit(x); setEf({ name: x.name, username: x.username, role: x.role }); setErr(""); }}>
               <Ic d={D.pencil} size={12} /> Edit
             </button>
+            {x.username !== session.username && (
+              x.isActive ? (
+                <button className="btn-ghost btn-sm" title="Block sign-in and sign them out — the account and its history are kept"
+                        onClick={() => { if (window.confirm(`Suspend ${x.username}? They will be signed out and cannot sign in again until you restore access. Nothing is deleted.`)) run(() => api.setProfileActive(x.id, false)); }}>
+                  <Ic d={D.close} size={12} /> Suspend
+                </button>
+              ) : (
+                <button className="btn-primary btn-sm" title="Allow this account to sign in again"
+                        onClick={() => run(() => api.setProfileActive(x.id, true))}>
+                  <Ic d={D.check} size={12} stroke="#fff" /> Restore
+                </button>
+              )
+            )}
             <button className="btn-ghost btn-sm" onClick={() => { setPw(x); setNp(""); setErr(""); }}>
               <Ic d={D.key} size={12} /> Password
             </button>

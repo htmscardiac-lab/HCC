@@ -245,6 +245,10 @@ function PPMList({ records, setRecords, session, mode }) {
                 {r.status === "pass" ? "✓ PASS" : "✗ FAIL"}
               </span>
               {awaiting && <span className="badge badge-orange">Awaiting Transfer</span>}
+              {(() => {
+                const n = Object.values(r.checklist?.answers || {}).filter(a => a?.note).length;
+                return n > 0 ? <span className="badge badge-gold">{n} note{n === 1 ? "" : "s"}</span> : null;
+              })()}
             </div>
             <div className="card-actions" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               <button className="btn-ghost btn-sm" onClick={() => setView(r)}>
@@ -319,11 +323,24 @@ function InlineChecklist({ record }) {
           }
         }
         return (
-          <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 9, fontSize: 12.5 }}>
-            <span style={{ color: "var(--text3)", fontFamily: "var(--mono)", fontSize: 11, minWidth: 18 }}>{i + 1}.</span>
-            <span style={{ flex: 1, minWidth: 120, fontWeight: 500 }}>{s.label}</span>
-            {cls ? <span className={"badge " + cls}>{display}</span>
-                 : <span style={{ fontWeight: 600, color: "var(--text2)" }}>{display}</span>}
+          <div key={s.id}>
+            <div style={{ display: "flex", alignItems: "center", gap: 9, fontSize: 12.5 }}>
+              <span style={{ color: "var(--text3)", fontFamily: "var(--mono)", fontSize: 11, minWidth: 18 }}>{i + 1}.</span>
+              <span style={{ flex: 1, minWidth: 120, fontWeight: 500 }}>{s.label}</span>
+              {cls ? <span className={"badge " + cls}>{display}</span>
+                   : <span style={{ fontWeight: 600, color: "var(--text2)" }}>{display}</span>}
+            </div>
+            {/* The engineer's note is shown here so it can be read without
+                opening the checklist — it often explains a failed reading. */}
+            {a?.note && (
+              <div style={{
+                marginLeft: 27, marginTop: 3, padding: "5px 9px",
+                background: "var(--gold-lt)", border: "1px solid var(--gold-mid)",
+                borderRadius: 5, fontSize: 11.5, color: "#7A5B08", lineHeight: 1.5,
+              }}>
+                <strong>Note:</strong> {a.note}
+              </div>
+            )}
           </div>
         );
       })}

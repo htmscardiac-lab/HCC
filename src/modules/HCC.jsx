@@ -4,6 +4,7 @@ import BarcodeInput from "../components/BarcodeScanner.jsx";
 import ChecklistRunner from "../components/ChecklistRunner.jsx";
 import { ChecklistViewer } from "./PPM.jsx";
 import { exportHCCList } from "../lib/exportRecords.js";
+import { printStickers, STICKER_SIZES, getStickerSize, setStickerSize } from "../lib/sticker.js";
 
 const OVERDUE_H = 2;           // In Process: warn after two hours
 const OUTGOING_OVERDUE_H = 24; // Outgoing: warn after one day
@@ -737,7 +738,13 @@ function OutgoingSection({ records, setRecords, session, deviceTypes, templates 
   const [edit, setEdit] = useState(null);
   const [notesId, setNotesId] = useState(null);
   const [runner, setRunner] = useState(null);   // admin re-running a checklist
+  const [size, setSize] = useState(getStickerSize);
   const isAdmin = session.role === "admin";
+
+  const changeSize = (k) => { setStickerSize(k); setSize(k); };
+
+  /** Only inspected devices carry a status worth putting on a sticker. */
+  const printable = (r) => (r.devices || []).filter(d => d.condition);
 
   const findTemplate = (deviceType) =>
     templates.find(t => t.module === "HCC" && t.deviceType === deviceType) || null;
@@ -815,7 +822,21 @@ function OutgoingSection({ records, setRecords, session, deviceTypes, templates 
 
   return (
     <div>
-      <SH title="Outgoing" sub="Mark Return and Report for every device before archiving" />
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
+        <SH title="Outgoing" sub="Mark Return and Report for every device before archiving" />
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontSize: 11.5, color: "var(--text3)", fontWeight: 600, whiteSpace: "nowrap" }}>
+            Sticker size
+          </span>
+          <select value={size} onChange={e => changeSize(e.target.value)}
+                  title="Saved on this computer — each workstation can use its own printer"
+                  style={{ width: "auto", minWidth: 210, fontSize: 12.5, padding: "6px 9px" }}>
+            {Object.entries(STICKER_SIZES).map(([k, v]) => (
+              <option key={k} value={k}>{v.label}</option>
+            ))}
+          </select>
+        </div>
+      </div>
       <div style={{ marginBottom: 16 }}>
         <SearchBar value={q} onChange={setQ} placeholder="Search by MRN, name, or HTM/SN…" />
       </div>
@@ -840,6 +861,18 @@ function OutgoingSection({ records, setRecords, session, deviceTypes, templates 
               <button className="btn-ghost btn-sm" onClick={() => setNotesId(r.id)}>
                 <Ic d={D.text} size={13} /> Notes
                 {(r.notes || []).length > 0 && <span className="count-dot">{r.notes.length}</span>}
+              </button>
+              <button className="btn-blue btn-sm"
+                      onClick={() => printStickers(r, printable(r), size)}
+                      disabled={printable(r).length === 0}
+                      style={{ opacity: printable(r).length ? 1 : .5 }}
+                      title="Print one sticker for every inspected device on this record">
+                <Ic d={D.copy} size={13} stroke="#fff" /> Print Stickers
+                {printable(r).length > 0 && (
+                  <span className="count-dot" style={{ background: "rgba(255,255,255,.2)", color: "#fff", borderColor: "rgba(255,255,255,.35)" }}>
+                    {printable(r).length}
+                  </span>
+                )}
               </button>
               {isAdmin && (
                 <button className="btn-ghost btn-sm" onClick={() => setEdit(r)}>
@@ -879,6 +912,12 @@ function OutgoingSection({ records, setRecords, session, deviceTypes, templates 
                   {d.checklist && (
                     <button className="btn-ghost btn-sm" onClick={() => setViewCl(d)}>
                       <Ic d={D.list} size={12} /> Checklist
+                    </button>
+                  )}
+                  {d.condition && (
+                    <button className="btn-blue btn-sm" title="Print a sticker for this device"
+                            onClick={() => printStickers(r, [d], size)}>
+                      <Ic d={D.copy} size={12} stroke="#fff" /> Print
                     </button>
                   )}
                   {isAdmin && (
