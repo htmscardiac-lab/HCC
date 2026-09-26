@@ -739,6 +739,7 @@ function OutgoingSection({ records, setRecords, session, deviceTypes, templates 
   const [notesId, setNotesId] = useState(null);
   const [runner, setRunner] = useState(null);   // admin re-running a checklist
   const [size, setSize] = useState(getStickerSize);
+  const [printHelp, setPrintHelp] = useState(false);
   const isAdmin = session.role === "admin";
 
   const changeSize = (k) => { setStickerSize(k); setSize(k); };
@@ -824,17 +825,20 @@ function OutgoingSection({ records, setRecords, session, deviceTypes, templates 
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
         <SH title="Outgoing" sub="Mark Return and Report for every device before archiving" />
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           <span style={{ fontSize: 11.5, color: "var(--text3)", fontWeight: 600, whiteSpace: "nowrap" }}>
             Sticker size
           </span>
           <select value={size} onChange={e => changeSize(e.target.value)}
-                  title="Saved on this computer — each workstation can use its own printer"
-                  style={{ width: "auto", minWidth: 210, fontSize: 12.5, padding: "6px 9px" }}>
+                  title="Saved on this phone — must match the label size set in Print Service by Honeywell"
+                  style={{ width: "auto", minWidth: 200, fontSize: 13 }}>
             {Object.entries(STICKER_SIZES).map(([k, v]) => (
               <option key={k} value={k}>{v.label}</option>
             ))}
           </select>
+          <button className="btn-ghost btn-sm" onClick={() => setPrintHelp(true)} title="Printer setup">
+            <Ic d={D.warn} size={13} /> Setup
+          </button>
         </div>
       </div>
       <div style={{ marginBottom: 16 }}>
@@ -962,6 +966,47 @@ function OutgoingSection({ records, setRecords, session, deviceTypes, templates 
         <NotesModal record={noteRec} session={session}
                     onAdd={addNote} onDelete={deleteNote}
                     onClose={() => setNotesId(null)} />
+      )}
+
+      {printHelp && (
+        <Modal title="Printer setup — one time per phone" onClose={() => setPrintHelp(false)}
+          footer={<button className="btn-primary" onClick={() => setPrintHelp(false)}>Got it</button>}>
+
+          <SL>Android · Honeywell RP2 / RP4 over Bluetooth</SL>
+          <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 11 }}>
+            {[
+              ["Install the print service",
+               "From Google Play, install “Print Service by Honeywell”. It acts as the printer driver — Chrome cannot see a Bluetooth printer without it."],
+              ["Pair the printer",
+               "Turn the printer on, then pair it in the phone’s Bluetooth settings as usual."],
+              ["Turn the service on",
+               "Phone Settings → Connections → Printing → enable “Print Service by Honeywell”, then ⋮ → Add printer and select your RP2."],
+              ["Set the label size",
+               "In the print service, set the media size to the same label you chose above. If the two differ, the sticker will be cut in the wrong place."],
+              ["Print",
+               "Tap Print on any device here, then pick the RP2 in the print dialog."],
+            ].map(([h, d], i) => (
+              <div key={i} style={{ display: "flex", gap: 11 }}>
+                <span style={{
+                  width: 24, height: 24, borderRadius: 7, background: "var(--green-lt)",
+                  color: "var(--green)", fontSize: 12, fontWeight: 800, flexShrink: 0,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  fontFamily: "var(--mono)",
+                }}>{i + 1}</span>
+                <div>
+                  <div style={{ fontSize: 13.5, fontWeight: 700, color: "var(--green3)" }}>{h}</div>
+                  <div style={{ fontSize: 12.5, color: "var(--text2)", lineHeight: 1.55, marginTop: 2 }}>{d}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="alert" style={{ marginTop: 16, marginBottom: 0, background: "var(--surface2)", border: "1px solid var(--border)", color: "var(--text2)", fontSize: 12 }}>
+            <Ic d={D.shield} size={13} />
+            The printer is thermal and prints in black only, so the sticker marks a
+            defective device with a solid black block rather than a colour.
+          </div>
+        </Modal>
       )}
     </div>
   );
