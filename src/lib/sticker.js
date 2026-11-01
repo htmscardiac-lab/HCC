@@ -159,7 +159,7 @@ export function printStickers(record, devices, sizeKey = getStickerSize()) {
  * If a browser refuses to print the frame, the sticker is opened as a normal
  * page instead so it can be printed from the browser menu.
  */
-function sendToPrinter(html) {
+export function sendToPrinter(html) {
   let frame = null;
   const cleanUp = () => {
     setTimeout(() => { try { frame && frame.remove(); } catch {} }, 1500);
