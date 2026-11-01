@@ -53,6 +53,25 @@ export function monthWeeks(year, month0) {
   return out;
 }
 
+/** Every week (by its Sunday) from the week of `start` to the week of `end`. */
+export function rangeWeeks(start, end) {
+  const out = [];
+  for (let w = weekStartOf(start); w <= weekStartOf(end); w = addDays(w, 7)) out.push(w);
+  return out;
+}
+
+/** The calendar month most of these weeks fall in — used for the print layout. */
+export function dominantMonth(weeks) {
+  const count = {};
+  weeks.forEach(w => [0, 1, 2, 3, 4, 5, 6].forEach(i => {
+    const k = addDays(w, i).slice(0, 7);
+    count[k] = (count[k] || 0) + 1;
+  }));
+  const best = Object.entries(count).sort((a, b) => b[1] - a[1])[0]?.[0] || todayKey().slice(0, 7);
+  const [y, m] = best.split("-").map(Number);
+  return { year: y, month0: m - 1, key: best };
+}
+
 export const fmtDay = (k) => dparse(k).toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
 export const fmtDayY = (k) => dparse(k).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
 export const weekLabel = (w) => `${fmtDay(w)} – ${fmtDay(weekEnd(w))}`;
@@ -79,8 +98,9 @@ export const awayAllWeek = (leaves, id, w) => awayDays(leaves, id, w) === 7;
  */
 export function makeCtx(users, members, leaves, plans) {
   const active = new Set(users.filter(u => u.isActive).map(u => u.id));
+  // Administrators supervise the roster; they are never part of it
   const pool = users
-    .filter(u => u.isActive && members[u.id]?.inRotation)
+    .filter(u => u.isActive && u.role !== "admin" && members[u.id]?.inRotation)
     .map(u => u.id);
   const catOf = (id) => members[id]?.category || "intern";
   return { active, pool, catOf, leaves, plans };
@@ -364,7 +384,27 @@ export async function loadRoster() {
     createdAt: r.created_at,
   }));
 
-  return { members, plans, leaves };
+  // Periods live in their own table; a missing table just means none yet.
+  let periods = [], periodsMissing = false;
+  const p = await supabase.from("roster_periods").select("*").order("start_week", { ascending: true });
+  if (p.error) periodsMissing = true;
+  else periods = (p.data || []).map(r => ({
+    id: r.id, label: r.label, start: r.start_week, end: r.end_week,
+  }));
+
+  return { members, plans, leaves, periods, periodsMissing };
+}
+
+export async function savePeriod({ id, label, start, end }) {
+  const row = { label, start_week: weekStartOf(start), end_week: weekStartOf(end) };
+  if (id) row.id = id;
+  const { error } = await supabase.from("roster_periods").upsert(row);
+  if (error) throw error;
+}
+
+export async function deletePeriod(id) {
+  const { error } = await supabase.from("roster_periods").delete().eq("id", id);
+  if (error) throw error;
 }
 
 /** True when the error means schema_roster.sql has not been run yet. */
@@ -419,7 +459,7 @@ export function subscribeRoster(onChange) {
   let timer = null;
   const ping = () => { clearTimeout(timer); timer = setTimeout(onChange, 400); };
   const ch = supabase.channel("htms-roster");
-  ["roster_members", "roster_weeks", "roster_leaves"].forEach(table =>
+  ["roster_members", "roster_weeks", "roster_leaves", "roster_periods"].forEach(table =>
     ch.on("postgres_changes", { event: "*", schema: "public", table }, ping));
   ch.subscribe();
   return () => { clearTimeout(timer); supabase.removeChannel(ch); };
