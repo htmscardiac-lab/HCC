@@ -148,9 +148,9 @@ function EditRecordModal({ record, deviceTypes = [], onSave, onClose }) {
       <SL>Patient Information</SL>
       <div className="grid-3" style={{ marginTop: 12 }}>
         <div className="field"><label>MRN *</label>
-          <input value={mrn} onChange={e => setMrn(e.target.value)} /></div>
+          <input value={mrn} maxLength={50} onChange={e => setMrn(e.target.value)} /></div>
         <div className="field"><label>Patient Name *</label>
-          <input value={name} onChange={e => setName(e.target.value)} /></div>
+          <input value={name} maxLength={150} onChange={e => setName(e.target.value)} /></div>
         <div className="field"><label>Patient Type *</label>
           <select value={ptype} onChange={e => setPtype(e.target.value)}>
             <option value="outpatient">Outpatient</option>
@@ -163,7 +163,7 @@ function EditRecordModal({ record, deviceTypes = [], onSave, onClose }) {
             <input value={ward} onChange={e => setWard(e.target.value)} placeholder="W-3A" /></div>
         )}
         <div className="field"><label>Phone / Extension *</label>
-          <input value={phone} onChange={e => setPhone(e.target.value)} /></div>
+          <input value={phone} maxLength={40} onChange={e => setPhone(e.target.value)} /></div>
       </div>
 
       <div style={{ borderTop: "1px solid var(--border)", margin: "8px 0 16px" }} />
@@ -463,9 +463,9 @@ function IncomingSection({ setRecords, session, deviceTypes }) {
         <SL>Patient Information</SL>
         <div className="grid-3" style={{ marginTop: 12 }}>
           <div className="field"><label>MRN *</label>
-            <input value={mrn} onChange={e => setMrn(e.target.value)} placeholder="MRN-12345" /></div>
+            <input value={mrn} maxLength={50} onChange={e => setMrn(e.target.value)} placeholder="MRN-12345" /></div>
           <div className="field"><label>Patient Name *</label>
-            <input value={name} onChange={e => setName(e.target.value)} placeholder="Full name" /></div>
+            <input value={name} maxLength={150} onChange={e => setName(e.target.value)} placeholder="Full name" /></div>
           <div className="field"><label>Patient Type *</label>
             <select value={ptype} onChange={e => setPtype(e.target.value)}>
               <option value="outpatient">Outpatient</option>
@@ -478,7 +478,7 @@ function IncomingSection({ setRecords, session, deviceTypes }) {
               <input value={ward} onChange={e => setWard(e.target.value)} placeholder="W-3A" /></div>
           )}
           <div className="field"><label>Phone / Extension *</label>
-            <input value={phone} onChange={e => setPhone(e.target.value)} placeholder="05xxxxxxxx" /></div>
+            <input value={phone} maxLength={40} onChange={e => setPhone(e.target.value)} placeholder="05xxxxxxxx" /></div>
           <div className="field"><label>Entry Date & Time *</label>
             <input type="datetime-local" value={edate} step="1"
                    onChange={e => { setEdate(e.target.value); edateManualRef.current = true; }} /></div>
