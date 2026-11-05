@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import { STYLE } from "./lib/theme.js";
 import { MNGHA_LOGO, HTMS_LOGO } from "./lib/logos.js";
 import { Ic, D, uid, Modal, SL } from "./lib/utils.jsx";
-import { friendlyError } from "./lib/supabase.js";
+import { friendlyError, passwordProblem } from "./lib/supabase.js";
 import { useSynced } from "./lib/useSynced.js";
 import { writesSettled, syncState } from "./lib/syncState.js";
 import * as api from "./lib/api.js";
@@ -10,6 +10,8 @@ import Launcher from "./components/Launcher.jsx";
 import ChecklistBuilder from "./components/ChecklistBuilder.jsx";
 import ListsManager from "./components/ListsManager.jsx";
 import { SignupModal, RequestsPanel } from "./components/SignupRequest.jsx";
+import { UnlockScreen, VaultModal } from "./components/Vault.jsx";
+import * as V from "./lib/vault.js";
 import HCC from "./modules/HCC.jsx";
 import PPM from "./modules/PPM.jsx";
 import CM  from "./modules/CM.jsx";
@@ -59,6 +61,12 @@ export default function App() {
   const [showUsers,   setShowUsers]   = useState(false);
   const [showBuilder, setShowBuilder] = useState(false);
   const [showLists,   setShowLists]   = useState(false);
+  const [showVault,   setShowVault]   = useState(false);
+
+  // Patient-data encryption: checking | off | missing | locked | ready
+  const [vault, setVault] = useState({ status: "checking", config: null });
+  const vaultRef = useRef(vault);
+  vaultRef.current = vault;
 
   const sessionRef = useRef(session);
   sessionRef.current = session;
@@ -68,6 +76,7 @@ export default function App() {
   /** End the session immediately and explain why on the sign-in screen. */
   const forceSignOut = useCallback(async (reason) => {
     try { await api.signOut(); } catch {}
+    V.lock();
     lastSig.current = "";
     setKickedOut(reason);
     setSession(null);
@@ -98,6 +107,17 @@ export default function App() {
       const me = users.find(u => u.id === sessionRef.current.id);
       if (me && !me.isActive) { forceSignOut("Your access has been suspended by an administrator."); return; }
       if (!me) { forceSignOut("Your account is no longer available. Contact an administrator."); return; }
+
+      // Passphrase changed on another device? Ask for the new one before
+      // loading, otherwise patient details would show as unreadable.
+      if (vaultRef.current.status === "ready") {
+        const cfg = await api.loadVaultConfig();
+        if (cfg && !cfg.missing && cfg.salt !== V.currentSalt()) {
+          V.lock();
+          setVault({ status: "locked", config: cfg });
+          return;
+        }
+      }
 
       const [lists, tpls, recs, reqs] = await Promise.all([
         api.loadLists(), api.loadTemplates(), api.loadRecords(), api.loadRequests(),
@@ -130,6 +150,29 @@ export default function App() {
     })();
   }, []);
 
+  /** After sign-in: is patient data encrypted, and does this tab hold the key? */
+  const checkVault = useCallback(async () => {
+    try {
+      const cfg = await api.loadVaultConfig();
+      if (!cfg) { V.setRequired(false); setVault({ status: "off", config: null }); return; }
+      if (cfg.missing) { V.setRequired(false); setVault({ status: "missing", config: null }); return; }
+      V.setRequired(true);
+      setVault({ status: (await V.restore(cfg)) ? "ready" : "locked", config: cfg });
+    } catch (err) {
+      // Never assume "off" on an error — that would save patient details as
+      // plain text. Keep waiting and try again.
+      console.error(err);
+      setTimeout(() => { if (sessionRef.current) checkVault(); }, 3000);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!session) { setVault({ status: "checking", config: null }); return; }
+    checkVault();
+  }, [session, checkVault]);
+
+  const dataReady = ["off", "missing", "ready"].includes(vault.status);
+
   /**
    * Load once signed in, then keep the screen fresh three ways, so new work
    * from another workstation shows up without anybody pressing refresh:
@@ -142,7 +185,7 @@ export default function App() {
    *     tab or wake the laptop.
    */
   useEffect(() => {
-    if (!session) return;
+    if (!session || !dataReady) return;
     let stop = () => {};
     let poll = null;
 
@@ -165,10 +208,11 @@ export default function App() {
       window.removeEventListener("focus", onVisible);
       window.removeEventListener("online", onVisible);
     };
-  }, [session, reload]);
+  }, [session, dataReady, reload]);
 
   const logout = async () => {
     try { await api.signOut(); } catch {}
+    V.lock();
     lastSig.current = "";
     setSession(null); setModule(null);
     resetRecords([]); resetTemplates([]); setUsersState([]); setRequests([]);
@@ -181,6 +225,20 @@ export default function App() {
     return <><style>{STYLE}</style>
       <Login notice={kickedOut}
              onLogin={(s) => { setKickedOut(""); setSession(s); }} />
+    </>;
+  }
+
+  if (vault.status === "checking") {
+    return <><style>{STYLE}</style>
+      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text3)", fontSize: 13, fontWeight: 600 }}>
+        Connecting…
+      </div>
+    </>;
+  }
+  if (vault.status === "locked") {
+    return <><style>{STYLE}</style>
+      <UnlockScreen config={vault.config} session={session} onLogout={logout}
+                    onUnlocked={() => { lastSig.current = ""; setVault(v => ({ ...v, status: "ready" })); }} />
     </>;
   }
 
@@ -201,6 +259,11 @@ export default function App() {
         <ChecklistBuilder templates={templates} setTemplates={setTemplates}
                           deviceTypes={dtypes} models={models}
                           session={session} onClose={() => setShowBuilder(false)} />
+      )}
+      {showVault && (
+        <VaultModal status={vault.status}
+                    onDone={() => { lastSig.current = ""; setVault(v => ({ ...v, status: "ready" })); checkVault(); reload(); }}
+                    onClose={() => setShowVault(false)} />
       )}
       {showLists && (
         <ListsManager deviceTypes={dtypes} setDeviceTypes={setDtypes}
@@ -226,6 +289,8 @@ export default function App() {
                   onUsers={() => setShowUsers(true)}
                   onBuilder={() => setShowBuilder(true)}
                   onLists={() => setShowLists(true)}
+                  onVault={() => setShowVault(true)}
+                  vaultOff={session.role === "admin" && vault.status !== "ready"}
                   pendingCount={pendingCount} />
         {adminModals}
       </>
@@ -249,6 +314,8 @@ export default function App() {
           onUsers={() => setShowUsers(true)}
           onBuilder={() => setShowBuilder(true)}
           onLists={() => setShowLists(true)}
+          onVault={() => setShowVault(true)}
+          vaultOn={vault.status === "ready"}
           pendingCount={pendingCount}
         />
 
@@ -342,7 +409,7 @@ function ErrorBar({ message, onClose }) {
 }
 
 // ── Header ─────────────────────────────────────────────────────────────
-function AppHeader({ session, module, meta, onBack, onLogout, onUsers, onBuilder, onLists, pendingCount }) {
+function AppHeader({ session, module, meta, onBack, onLogout, onUsers, onBuilder, onLists, onVault, vaultOn, pendingCount }) {
   return (
     <header className="app-header" style={{
       background: "var(--green3)", borderBottom: "3px solid var(--gold)",
@@ -390,6 +457,10 @@ function AppHeader({ session, module, meta, onBack, onLogout, onUsers, onBuilder
             <button onClick={onLists} title="Manage dropdown lists" style={hBtn}>
               <Ic d={D.chip} size={14} stroke="#fff" />
               <span style={{ fontSize: 12 }}>Lists</span>
+            </button>
+            <button onClick={onVault} title={vaultOn ? "Patient data encrypted" : "Patient data NOT encrypted"} style={hBtn}>
+              <Ic d={D.key} size={14} stroke={vaultOn ? "#fff" : "var(--gold-mid)"} />
+              <span style={{ fontSize: 12 }}>Encryption</span>
             </button>
             <button onClick={onUsers} title="User Management" style={{ ...hBtn, position: "relative" }}>
               <Ic d={D.users} size={14} stroke="#fff" />
@@ -549,6 +620,7 @@ function UsersModal({ users, session, requests, reload, onError, onClose }) {
   const create = async () => {
     setErr("");
     if (!f.name.trim() || !f.username.trim() || !f.password.trim()) { setErr("All fields are required."); return; }
+    if (passwordProblem(f.password)) { setErr(passwordProblem(f.password)); return; }
     if (users.some(x => x.username === f.username.trim())) { setErr("That username already exists."); return; }
     try {
       await api.createUser(f);
@@ -713,7 +785,7 @@ function UsersModal({ users, session, requests, reload, onError, onClose }) {
             <button className="btn-ghost" onClick={() => setPw(null)}>Cancel</button>
             <button className="btn-primary" onClick={async () => {
               setErr("");
-              if (np.trim().length < 6) { setErr("Password must be at least 6 characters."); return; }
+              if (passwordProblem(np)) { setErr(passwordProblem(np)); return; }
               try { await api.changePassword(pw, np); setPw(null); setNp(""); }
               catch (e) { setErr(friendlyError(e)); }
             }}>
@@ -733,7 +805,7 @@ function UsersModal({ users, session, requests, reload, onError, onClose }) {
           <div className="field" style={{ marginBottom: 0 }}>
             <label>New Password</label>
             <input type="password" value={np} onChange={e => setNp(e.target.value)} autoFocus
-                   placeholder="At least 6 characters"
+                   placeholder="8+ characters, letters and numbers"
                    onKeyDown={e => { if (e.key === "Enter") e.preventDefault(); }} />
           </div>
         </Modal>
