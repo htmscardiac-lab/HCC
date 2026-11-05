@@ -109,6 +109,14 @@ export function DefectiveReviewModal({ record, device, session, config, mode = "
   const failureNames = failuresFor(config, device.deviceType);
   const recs = (config?.recommendations || []).map(r => r.name);
 
+  // Devices not owned by the hospital need manufacturer and model on the
+  // report: typed in when missing, confirmed by the admin when already there.
+  const hadDetails = !!(device.manufacturer?.trim() && device.model?.trim());
+  const [mfr, setMfr] = useState(device.manufacturer || "");
+  const [model, setModel] = useState(device.model || "");
+  const [detailsOk, setDetailsOk] = useState(mode === "edit");
+  const dev = { ...device, manufacturer: mfr.trim(), model: model.trim() };
+
   const [owned, setOwned] = useState(device.ownedByHospital);           // null | true | false
   const [attachments, setAttachments] = useState(device.attachments || []);
   const uploadedNow = useRef([]);                                        // removed again on Cancel
@@ -137,8 +145,8 @@ export function DefectiveReviewModal({ record, device, session, config, mode = "
 
   // Findings follow the parts until the admin edits the text by hand
   useEffect(() => {
-    if (!findingsEdited) setFindings(findingsFor(template, device, chosenParts));
-  }, [chosenParts]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (!findingsEdited) setFindings(findingsFor(template, dev, chosenParts));
+  }, [chosenParts, mfr, model]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const draft = {
     parts: chosenParts,
@@ -179,7 +187,14 @@ export function DefectiveReviewModal({ record, device, session, config, mode = "
     onClose();
   };
 
+  const detailsProblem = () => {
+    if (!mfr.trim() || !model.trim()) return "Enter the manufacturer and model.";
+    if (hadDetails && !detailsOk) return "Confirm that the manufacturer and model are correct.";
+    return "";
+  };
+
   const validateReport = () => {
+    const d = detailsProblem(); if (d) return d;
     if (!chosenParts.length) return "Select at least one faulty part.";
     if (chosenParts.some(p => !p.failure)) return "Choose a failure type for every selected part.";
     if (!draft.findings) return "Findings cannot be empty.";
@@ -196,7 +211,8 @@ export function DefectiveReviewModal({ record, device, session, config, mode = "
     } else {
       const problem = validateReport();
       if (problem) { setErr(problem); setStep("form"); return; }
-      patch = { ownedByHospital: false, report: draft, reportChecked: true };
+      patch = { ownedByHospital: false, report: draft, reportChecked: true,
+                manufacturer: mfr.trim(), model: model.trim() };
     }
     if (mode === "review") patch = { ...patch, stage: "outgoing", outgoingAt: ts() };
     setSaving(true);
@@ -205,7 +221,7 @@ export function DefectiveReviewModal({ record, device, session, config, mode = "
     finally { setSaving(false); }
   };
 
-  const previewDevice = { ...device, report: draft };
+  const previewDevice = { ...dev, report: draft };
   const title = `${mode === "edit" ? "Edit" : "Review"} — ${device.deviceNo || device.htmSn} · ${device.deviceType}`;
 
   return (
@@ -233,7 +249,7 @@ export function DefectiveReviewModal({ record, device, session, config, mode = "
       {/* Device summary */}
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
         <span className="info-pill">MRN {record.mrn}</span>
-        <span className="info-pill">{device.deviceType}{device.model ? " · " + device.model : ""}</span>
+        <span className="info-pill">{device.deviceType}{model.trim() ? " · " + model.trim() : ""}</span>
         <span className="info-pill" style={{ fontFamily: "var(--mono)" }}>{device.htmSn}</span>
         <span className="badge badge-red">✗ Defective</span>
       </div>
@@ -263,6 +279,23 @@ export function DefectiveReviewModal({ record, device, session, config, mode = "
         </>)}
 
         {owned === false && (<>
+        <SL>Device details {hadDetails ? "— confirm" : "— required"}</SL>
+        <div className="grid-2" style={{ margin: "10px 0 6px" }}>
+          <div className="field"><label>Manufacturer *</label>
+            <input value={mfr} maxLength={80} onChange={e => { setMfr(e.target.value); setErr(""); }}
+                   style={!mfr.trim() ? { borderColor: "var(--red)" } : undefined} /></div>
+          <div className="field"><label>Model *</label>
+            <input value={model} maxLength={80} onChange={e => { setModel(e.target.value); setErr(""); }}
+                   style={!model.trim() ? { borderColor: "var(--red)" } : undefined} /></div>
+        </div>
+        {hadDetails && (
+          <label className="checkbox-custom" style={{ fontSize: 13, textTransform: "none", letterSpacing: 0, marginBottom: 18 }}>
+            <input type="checkbox" checked={detailsOk} onChange={e => { setDetailsOk(e.target.checked); setErr(""); }} />
+            I confirm the manufacturer and model are correct
+          </label>
+        )}
+        {!hadDetails && <div style={{ marginBottom: 18 }} />}
+
           <SL>Faulty parts — {device.deviceType}</SL>
           {partNames.length === 0 && (
             <div className="alert alert-warn" style={{ marginTop: 8 }}>
@@ -324,7 +357,7 @@ export function DefectiveReviewModal({ record, device, session, config, mode = "
             <label style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <span>Findings</span>
               {findingsEdited && (
-                <button className="btn-ghost btn-sm" onClick={() => { setFindingsEdited(false); setFindings(findingsFor(template, device, chosenParts)); }}>
+                <button className="btn-ghost btn-sm" onClick={() => { setFindingsEdited(false); setFindings(findingsFor(template, dev, chosenParts)); }}>
                   Rewrite from template
                 </button>
               )}
