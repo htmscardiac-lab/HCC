@@ -399,46 +399,32 @@ export default function HCC({ records, setRecords, session, deviceTypes, templat
       ...r, devices: r.devices.map(d => d.id !== did ? d : { ...d, ...patch }),
     }));
 
-  const stats = [
-    { label: "In Process", value: inProcess.length, color: overdue > 0 ? "var(--orange)" : "var(--gold)", warn: overdue },
-    { label: "Defective Review", value: defCount, color: defCount > 0 ? "var(--red)" : "var(--text2)" },
-    { label: "Outgoing",   value: outgoing.length,  color: outOverdue > 0 ? "var(--orange)" : "var(--green)", warn: outOverdue },
-    { label: "Archived",   value: archived.length,  color: "var(--text2)" },
-  ];
-
-  const tabs = [
-    { key: "incoming",   label: "Incoming",   count: 0,                icon: D.inbox },
-    { key: "in_process", label: "In Process", count: inProcess.length, icon: D.process, dot: overdue > 0 },
-    { key: "defective",  label: "Defective Review", count: defCount,   icon: D.warn, dot: defCount > 0 },
-    { key: "outgoing",   label: "Outgoing",   count: outgoing.length,  icon: D.outgoing, dot: outOverdue > 0 },
-    { key: "archive",    label: "Archive",    count: archived.length,  icon: D.archive },
-    { key: "roster",     label: "On-Call",    count: 0,                icon: D.calendar },
+  // One row of cards: each shows its number and opens its page
+  const navCards = [
+    { key: "incoming",   label: "Incoming",         icon: D.inbox },
+    { key: "in_process", label: "In Process",       value: inProcess.length, color: overdue > 0 ? "var(--orange)" : "var(--gold)", warn: overdue },
+    { key: "defective",  label: "Defective Review", value: defCount,         color: defCount > 0 ? "var(--red)" : "var(--text2)" },
+    { key: "outgoing",   label: "Outgoing",         value: outgoing.length,  color: outOverdue > 0 ? "var(--orange)" : "var(--green)", warn: outOverdue },
+    { key: "archive",    label: "Archived",         value: archived.length,  color: "var(--text2)" },
+    { key: "roster",     label: "On-Call",          icon: D.calendar },
   ];
 
   return (
     <div>
       {tab !== "roster" && <OnDutyStrip roster={roster} users={users} onOpen={() => setTab("roster")} />}
 
-      {/* Stats */}
-      <div className="grid-4" style={{ marginBottom: 18 }}>
-        {stats.map(s => (
-          <div key={s.label} className="stat-card" style={{ "--sbar": s.color }}>
-            <div className="stat-value" style={{ color: s.color }}>
-              {s.value}
-              {s.warn > 0 && <span style={{ fontSize: 13, marginLeft: 7, color: "var(--orange)" }}>⚠{s.warn}</span>}
-            </div>
-            <div className="stat-label">{s.label}</div>
-          </div>
-        ))}
-      </div>
-
-      {/* Tabs */}
-      <div className="tab-bar" style={{ marginBottom: 20 }}>
-        {tabs.map(t => (
-          <button key={t.key} className={"tab-btn" + (tab === t.key ? " active" : "")} onClick={() => setTab(t.key)}>
-            <Ic d={t.icon} size={13} /> {t.label}
-            {t.dot && <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--orange)" }} />}
-            {t.count > 0 && <span className="count-dot">{t.count}</span>}
+      {/* Navigation */}
+      <div className="nav-cards">
+        {navCards.map(c => (
+          <button key={c.key} className={"stat-card nav-card" + (tab === c.key ? " active" : "")}
+                  style={{ "--sbar": c.color || "var(--green)" }} onClick={() => setTab(c.key)}>
+            {c.icon
+              ? <div className="nav-icon"><Ic d={c.icon} size={22} /></div>
+              : <div className="stat-value" style={{ color: c.color }}>
+                  {c.value}
+                  {c.warn > 0 && <span style={{ fontSize: 13, marginLeft: 7, color: "var(--orange)" }}>⚠{c.warn}</span>}
+                </div>}
+            <div className="stat-label">{c.label}</div>
           </button>
         ))}
       </div>
