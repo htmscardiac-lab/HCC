@@ -48,15 +48,15 @@ export default function Launcher({ session, onPick, onLogout, stats,
         padding: "0 20px", height: 64, display: "flex", alignItems: "center",
         justifyContent: "space-between", flexShrink: 0, boxShadow: "0 2px 12px rgba(0,0,0,.18)"
       }} className="app-header">
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <div className="lh-brand" style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <img src={MNGHA_LOGO} alt="MNGHA" style={{ width: 46, height: 46, borderRadius: "50%", objectFit: "cover", border: "2px solid var(--gold)", background: "#fff", flexShrink: 0 }} />
-          <div>
-            <div style={{ color: "#fff", fontWeight: 800, fontSize: 14, lineHeight: 1.2 }}>وزارة الحرس الوطني — الشؤون الصحية</div>
-            <div style={{ color: "var(--gold-mid)", fontSize: 12, fontWeight: 700 }}>Ministry of National Guard Health Affairs</div>
+          <div className="lh-names">
+            <div className="lh-ar" style={{ color: "#fff", fontWeight: 800, fontSize: 14, lineHeight: 1.2 }}>وزارة الحرس الوطني — الشؤون الصحية</div>
+            <div className="lh-en" style={{ color: "var(--gold-mid)", fontSize: 12, fontWeight: 700 }}>Ministry of National Guard Health Affairs</div>
           </div>
-          <div style={{ width: 1, height: 36, background: "rgba(255,255,255,.2)", margin: "0 8px" }} />
-          <img src={HTMS_LOGO} alt="HTMS" style={{ width: 42, height: 42, borderRadius: 8, objectFit: "cover", border: "1px solid rgba(255,255,255,.2)", flexShrink: 0 }} />
-          <div>
+          <div className="lh-divider" style={{ width: 1, height: 36, background: "rgba(255,255,255,.2)", margin: "0 8px" }} />
+          <img className="lh-htms-logo" src={HTMS_LOGO} alt="HTMS" style={{ width: 42, height: 42, borderRadius: 8, objectFit: "cover", border: "1px solid rgba(255,255,255,.2)", flexShrink: 0 }} />
+          <div className="lh-htms-text">
             <div style={{ color: "rgba(255,255,255,.9)", fontWeight: 700, fontSize: 13 }}>HTMS — Healthcare Technology Management Services</div>
             <div style={{ color: "rgba(255,255,255,.45)", fontSize: 11, letterSpacing: ".04em" }}>Cardiac Lab Platform</div>
           </div>
@@ -88,24 +88,25 @@ export default function Launcher({ session, onPick, onLogout, stats,
                   }}>{pendingCount}</span>
                 )}
               </button>
-              <div style={{ width: 1, height: 30, background: "rgba(255,255,255,.2)" }} />
+              <div className="lh-divider" style={{ width: 1, height: 30, background: "rgba(255,255,255,.2)" }} />
             </>
           )}
-          <div style={{ textAlign: "right" }}>
+          <div className="lh-user" style={{ textAlign: "right" }}>
             <div style={{ color: "#fff", fontSize: 13, fontWeight: 600 }}>{session.name}</div>
             <div style={{ color: "rgba(255,255,255,.45)", fontSize: 11 }}>@{session.username}</div>
           </div>
-          <span className={"badge " + (session.role === "admin" ? "badge-gold" : "badge-green")} style={{ fontSize: 10 }}>
+          <span className={"lh-role badge " + (session.role === "admin" ? "badge-gold" : "badge-green")} style={{ fontSize: 10 }}>
             {session.role.toUpperCase()}
           </span>
-          <button onClick={onLogout} style={{
+          <div className="lh-break" />
+          <button className="lh-logout" onClick={onLogout} title="Sign Out" style={{
             background: "rgba(255,255,255,.1)", color: "#fff", border: "1px solid rgba(255,255,255,.2)",
             borderRadius: 6, padding: "6px 13px", fontSize: 12, fontFamily: "var(--sans)",
             fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 6
           }}
             onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,.2)"}
             onMouseLeave={e => e.currentTarget.style.background = "rgba(255,255,255,.1)"}>
-            <Ic d={D.logout} size={13} stroke="#fff" /> Sign Out
+            <Ic d={D.logout} size={13} stroke="#fff" /> <span>Sign Out</span>
           </button>
         </div>
       </header>
