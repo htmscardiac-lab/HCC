@@ -86,6 +86,14 @@ export const STYLE = `
   .stat-card::before { content:''; position: absolute; top:0; left:0; right:0; height:3px; background: var(--sbar,#1a6b3c); }
   .stat-value { font-family: var(--mono); font-size: 30px; font-weight: 600; line-height: 1; }
   .stat-label { font-size: 11px; color: var(--text3); text-transform: uppercase; letter-spacing: .06em; font-weight: 700; }
+  /* Stat cards that double as the page's navigation */
+  .nav-cards { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; margin-bottom: 20px; }
+  .nav-card { cursor: pointer; text-align: left; align-items: flex-start; font: inherit; padding: 14px 16px; border-radius: var(--radius2); transition: border-color .15s, background .15s, transform .15s; }
+  .nav-card:hover { border-color: var(--green-mid); transform: translateY(-1px); }
+  .nav-card.active { border: 2px solid var(--green); background: var(--green-lt); padding: 13px 15px; }
+  .nav-card.active .stat-label { color: var(--green); }
+  .nav-card .nav-icon { height: 30px; display: flex; align-items: center; color: var(--text2); }
+  .nav-card.active .nav-icon { color: var(--green); }
   .device-row { background: var(--surface2); border: 1px solid var(--border); border-radius: 6px; padding: 10px 14px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; transition: border-color .15s; }
   .device-row:hover { border-color: var(--border2); }
   .info-pill { background: var(--surface3); border: 1px solid var(--border); border-radius: 4px; padding: 2px 9px; font-size: 12px; color: var(--text3); font-weight: 500; display: inline-flex; align-items: center; gap: 5px; }
@@ -156,6 +164,11 @@ export const STYLE = `
     .card { padding: 14px; }
     .stat-value { font-size: 25px; }
     .stat-card { padding: 12px 14px; }
+    .nav-cards { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-bottom: 16px; }
+    .nav-card { padding: 10px 11px; }
+    .nav-card.active { padding: 9px 10px; }
+    .nav-card .nav-icon { height: 25px; }
+    .nav-card .stat-label { font-size: 10px; letter-spacing: .03em; }
 
     /* Cards: header rows and their action buttons wrap and go full width */
     .cardhead { flex-direction: column; align-items: stretch !important; gap: 10px; }
