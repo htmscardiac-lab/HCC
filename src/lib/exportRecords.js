@@ -133,8 +133,8 @@ export function exportPPMList(records, label = "PPM") {
 export function exportHCCList(records, label = "HCC_Archive") {
   const summary = [[
     "MRN", "Patient Name", "Type", "Ward", "Phone",
-    "Entry Date", "Exit Date", "HTM/SN", "Device Type", "Model", "Manufacturer",
-    "Condition", "Checklist", "Passed", "Failed", "N/A",
+    "Entry Date", "Exit Date", "Device No", "HTM/SN", "Device Type", "Model", "Manufacturer",
+    "Condition", "Hospital Owned", "Faulty Parts", "Recommendation", "Checklist", "Passed", "Failed", "N/A",
     "Return", "Report", "Created By", "Inspected By", "Inspection Date",
     "Completed By", "Edited By", "Notes",
   ]];
@@ -155,8 +155,11 @@ export function exportHCCList(records, label = "HCC_Archive") {
       summary.push([
         r.mrn, r.patientName, r.patientType, r.ward || "", r.phone || "",
         fmt(r.entryDate), fmt(r.exitDate),
-        d.htmSn, d.deviceType, d.model || "", d.manufacturer || "",
+        d.deviceNo || "", d.htmSn, d.deviceType, d.model || "", d.manufacturer || "",
         d.condition || "",
+        d.ownedByHospital === true ? "Yes" : d.ownedByHospital === false ? "No" : "",
+        (d.report?.parts || []).map(p => p.failure ? `${p.part} (${p.failure})` : p.part).join("; "),
+        d.report?.recommendation || "",
         cl.templateName || "",
         cl.summary?.passed ?? "", cl.summary?.failed ?? "", cl.summary?.na ?? "",
         d.returnChecked ? "Yes" : "No", d.reportChecked ? "Yes" : "No",

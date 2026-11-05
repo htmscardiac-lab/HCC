@@ -1,5 +1,5 @@
 /**
- * Device status stickers for HCC Outgoing.
+ * Device status stickers for HCC Outgoing (40 × 12 mm).
  *
  * Built for a Honeywell RP-series mobile thermal printer, which prints in
  * BLACK ONLY at 203 dpi. So the design never relies on colour to carry meaning:
@@ -13,96 +13,36 @@
  * extra software.
  */
 
-const SIZE_KEY = "htms_sticker_size";
-
-/**
- * Label presets. `w` is the LABEL width; `print` is the printer's usable
- * print width (the RP2 can only mark 48 mm of a 57 mm roll).
- * `compact` switches to the type scale tuned for narrow labels.
- */
-export const STICKER_SIZES = {
-  "rp2-50x76": { label: "RP2 · 50 × 76 mm  (2 × 3 in)", w: 48, h: 76, compact: true },
-  "rp2-50x50": { label: "RP2 · 50 × 50 mm",             w: 48, h: 50, compact: true },
-  "rp2-50x30": { label: "RP2 · 50 × 30 mm  (short)",    w: 48, h: 30, compact: true, tiny: true },
-  "rp4-100x62":{ label: "RP4 · 100 × 62 mm",            w: 100, h: 62 },
-  "rp4-100x50":{ label: "RP4 · 100 × 50 mm",            w: 100, h: 50 },
-  "a4":        { label: "A4 sheet  (cut after printing)", w: 100, h: 62, sheet: true },
-};
-
-export const getStickerSize = () => {
-  try {
-    const v = localStorage.getItem(SIZE_KEY);
-    if (v && STICKER_SIZES[v]) return v;
-  } catch {}
-  return "rp2-50x76";
-};
-
-export const setStickerSize = (key) => {
-  try { localStorage.setItem(SIZE_KEY, key); } catch {}
-};
+/** The one label size in use: 40 × 12 mm. */
+export const STICKER = { w: 40, h: 12, label: "40 × 12 mm" };
 
 const esc = (s) => String(s ?? "")
   .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
   .replace(/"/g, "&quot;");
 
-/** Type scale in millimetres, tuned per label width. */
-function scale(size) {
-  if (size.tiny)    return { mark: 6.5, word: 3.6, name: 3.2, key: 2.1, val: 2.6, gap: 0.6, pad: 2 };
-  if (size.compact) return { mark: 9,   word: 4.6, name: 4.0, key: 2.5, val: 3.2, gap: 1.0, pad: 2.5 };
-  return              { mark: 11,  word: 6.0, name: 5.0, key: 2.9, val: 3.8, gap: 1.2, pad: 3.5 };
-}
-
-function stickerHtml(record, device, size) {
+/**
+ * One 40 × 12 mm sticker: device status on the left, MRN on the right.
+ *   WORKING    → white box, heavy outline, ✓
+ *   DEFECTIVE  → solid black box, white text, ✗
+ */
+function stickerHtml(record, device) {
   const working = device.condition === "working";
-  const mark = working ? "✓" : "✗";
-  const word = working ? "WORKING" : "DEFECTIVE";
-
-  // On a very short label only the essentials fit.
-  const rows = [
-    ["MRN", record.mrn, true],
-    record.patientType === "inpatient" && record.ward ? ["WARD", record.ward, false] : null,
-    ["CONTACT", record.phone, true],
-    size.tiny ? null : ["DEVICE", device.deviceType, false],
-    size.tiny ? null : ["HTM / SN", device.htmSn, true],
-  ].filter(Boolean);
-
   return `
   <div class="sticker">
     <div class="status ${working ? "ok" : "bad"}">
-      <span class="mark">${mark}</span><span class="word">${word}</span>
+      <span class="mark">${working ? "✓" : "✗"}</span>
+      <span class="word">${working ? "WORKING" : "DEFECTIVE"}</span>
     </div>
-    <div class="who">${esc(record.patientName || "—")}</div>
-    <div class="rows">
-      ${rows.map(([k, v, mono]) => `
-        <div class="row">
-          <span class="k">${k}</span>
-          <span class="v${mono ? " mono" : ""}">${esc(v || "—")}</span>
-        </div>`).join("")}
-    </div>
+    <div class="mrn"><span class="k">MRN</span><span class="v">${esc(record.mrn || "—")}</span></div>
   </div>`;
 }
 
 /**
- * Open the print dialog for one or more device stickers.
- *
- * @param record   the HCC record (patient details)
- * @param devices  devices to print — one sticker each
+ * Open the print dialog for one or more device stickers (one per device).
  */
-export function printStickers(record, devices, sizeKey = getStickerSize()) {
-  const size = STICKER_SIZES[sizeKey] || STICKER_SIZES["rp2-50x76"];
+export function printStickers(record, devices) {
   const list = (devices || []).filter(Boolean);
   if (!list.length) return;
-
-  const t = scale(size);
-  const sheet = !!size.sheet;
-
-  const page = sheet
-    ? `@page { size: A4; margin: 10mm; }`
-    : `@page { size: ${size.w}mm ${size.h}mm; margin: 0; }`;
-
-  const box = sheet
-    ? `width: ${size.w}mm; height: ${size.h}mm; margin: 0 auto 5mm; border: 0.3mm dashed #888;`
-    : `width: ${size.w}mm; height: ${size.h}mm; page-break-after: always;`;
 
   const html = `<!doctype html>
 <html><head><meta charset="utf-8"><title>Device sticker</title>
@@ -110,40 +50,35 @@ export function printStickers(record, devices, sizeKey = getStickerSize()) {
   * { box-sizing: border-box; margin: 0; padding: 0;
       -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   body { font-family: Arial, Helvetica, sans-serif; color: #000; }
-  ${page}
+  @page { size: ${STICKER.w}mm ${STICKER.h}mm; margin: 0; }
 
-  .sticker { ${box} padding: ${t.pad}mm; display: flex; flex-direction: column; overflow: hidden; }
+  .sticker { width: ${STICKER.w}mm; height: ${STICKER.h}mm; padding: 1mm;
+             display: flex; align-items: stretch; gap: 1mm;
+             overflow: hidden; page-break-after: always; }
   .sticker:last-child { page-break-after: auto; }
 
-  /* Status block — meaning carried by shape and contrast, never by colour,
-     because the RP-series prints in black only. */
-  .status { display: flex; align-items: center; justify-content: center;
-            gap: ${t.pad}mm; padding: ${t.gap}mm ${t.pad}mm;
-            margin-bottom: ${t.gap * 1.6}mm; }
-  .status.ok  { border: 1.2mm solid #000; background: #fff; color: #000; }
-  .status.bad { border: 1.2mm solid #000; background: #000; color: #fff; }
-  .mark { font-size: ${t.mark}mm; font-weight: 700; line-height: 1; }
-  .word { font-size: ${t.word}mm; font-weight: 700; letter-spacing: .3mm; line-height: 1; }
+  /* Meaning carried by shape and contrast, never colour — the printer is
+     black only. */
+  .status { flex: 0 0 21mm; display: flex; align-items: center; justify-content: center;
+            gap: 0.8mm; border: 0.6mm solid #000; border-radius: 0.8mm; }
+  .status.ok  { background: #fff; color: #000; }
+  .status.bad { background: #000; color: #fff; }
+  .mark { font-size: 4.2mm; font-weight: 700; line-height: 1; }
+  .word { font-size: 2.6mm; font-weight: 800; letter-spacing: .1mm; line-height: 1; }
+  .status.bad .word { font-size: 2.3mm; letter-spacing: 0; }
+  .status.bad .mark { font-size: 3.6mm; }
 
-  .who { font-size: ${t.name}mm; font-weight: 700; text-align: center;
-         margin-bottom: ${t.gap * 1.4}mm; white-space: nowrap;
-         overflow: hidden; text-overflow: ellipsis; }
-
-  .rows { display: flex; flex-direction: column; gap: ${t.gap}mm; }
-  .row  { display: flex; justify-content: space-between; align-items: baseline;
-          gap: 2mm; border-bottom: 0.25mm solid #000; padding-bottom: ${t.gap * 0.7}mm; }
-  .k    { font-size: ${t.key}mm; font-weight: 700; letter-spacing: .2mm;
-          flex-shrink: 0; }
-  .v    { font-size: ${t.val}mm; font-weight: 700; text-align: right;
-          overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .mono { font-family: "Courier New", monospace; }
+  .mrn { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; }
+  .k   { font-size: 1.9mm; font-weight: 700; letter-spacing: .2mm; line-height: 1.1; }
+  .v   { font-size: 3.4mm; font-weight: 800; font-family: "Courier New", monospace;
+         line-height: 1.1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
   @media screen {
     body { background: #ddd; padding: 8mm; }
     .sticker { background: #fff; margin: 0 auto 5mm; box-shadow: 0 1px 6px rgba(0,0,0,.3); }
   }
 </style></head>
-<body>${list.map(d => stickerHtml(record, d, size)).join("")}</body></html>`;
+<body>${list.map(d => stickerHtml(record, d)).join("")}</body></html>`;
 
   sendToPrinter(html);
 }

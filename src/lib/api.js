@@ -578,6 +578,12 @@ const deviceRow = (d, recordId, i) => ({
   inspection_date: orNull(d.inspectionDate),
   inspected_by: idOf(d.inspectedBy),
   sort_order: i,
+  // HCC v2 — device_no is never written: the database assigns it
+  stage: d.stage || "in_process",
+  outgoing_at: toIso(d.outgoingAt),
+  owned_by_hospital: d.ownedByHospital ?? null,
+  report: d.report ?? null,
+  attachments: d.attachments || [],
 });
 
 const deviceFromRow = (d) => ({
@@ -592,6 +598,12 @@ const deviceFromRow = (d) => ({
   reportChecked: !!d.report_checked,
   inspectionDate: d.inspection_date || "",
   inspectedBy: d.inspected_by ? nameOf(d.inspected_by) : "",
+  stage: d.stage || "",
+  deviceNo: d.device_no || "",
+  outgoingAt: d.outgoing_at || "",
+  ownedByHospital: d.owned_by_hospital ?? null,
+  report: d.report || null,
+  attachments: d.attachments || [],
 });
 
 async function recordFromRow(row, devices) {
@@ -730,6 +742,101 @@ export async function syncRecords(prev, next) {
     const { error } = await supabase.from("devices").upsert(changedDevices);
     if (error) throw error;
   }
+}
+
+// ── HCC: fault lists, report template, attachments ─────────────────────
+
+const missingTable = (e) => /does not exist|Could not find|PGRST205|42P01/i.test(e?.message || "");
+
+/**
+ * Lists used by the defective-device report, as
+ *   { parts: { [deviceType]: [{id,name}] },
+ *     failures: { common: [{id,name}], byType: { [deviceType]: [{id,name}] } },
+ *     recommendations: [{id,name}] }
+ * plus the saved report template (null = use the default).
+ */
+export async function loadHccConfig() {
+  const [o, t] = await Promise.all([
+    supabase.from("hcc_options").select("*").order("sort_order").order("id"),
+    supabase.from("hcc_report_template").select("*").eq("id", 1).maybeSingle(),
+  ]);
+  if (o.error) { if (missingTable(o.error)) return { missing: true }; throw o.error; }
+  const parts = {}, byType = {}, common = [], recommendations = [];
+  (o.data || []).forEach(r => {
+    const item = { id: r.id, name: r.name };
+    if (r.kind === "part") (parts[r.device_type] ||= []).push(item);
+    else if (r.kind === "failure") (r.device_type ? (byType[r.device_type] ||= []) : common).push(item);
+    else if (r.kind === "recommendation") recommendations.push(item);
+  });
+  return {
+    parts, failures: { common, byType }, recommendations,
+    template: t.error ? null : (t.data?.data || null),
+  };
+}
+
+export async function addHccOption(kind, deviceType, name) {
+  const { error } = await supabase.from("hcc_options").insert({
+    kind, device_type: deviceType || null, name: String(name).trim(), sort_order: 999,
+  });
+  if (error) {
+    if (/duplicate|unique/i.test(error.message || "")) throw new Error("That item is already in the list.");
+    throw error;
+  }
+}
+
+export async function renameHccOption(id, name) {
+  const { error } = await supabase.from("hcc_options").update({ name: String(name).trim() }).eq("id", id);
+  if (error) throw error;
+}
+
+export async function deleteHccOption(id) {
+  const { error } = await supabase.from("hcc_options").delete().eq("id", id);
+  if (error) throw error;
+}
+
+export async function saveReportTemplate(data, actorId) {
+  const { error } = await supabase.from("hcc_report_template").upsert(
+    { id: 1, data, updated_at: new Date().toISOString(), updated_by: actorId || null },
+    { onConflict: "id" });
+  if (error) throw error;
+}
+
+const BUCKET = "hcc-attachments";
+const ATTACH_TYPES = ["application/pdf", "image/jpeg", "image/png", "image/webp"];
+export const ATTACH_MAX = 5 * 1024 * 1024;
+
+/** Upload one attachment for a device (admin). Returns its metadata. */
+export async function uploadAttachment(file, recordId, deviceId, byUsername) {
+  if (!ATTACH_TYPES.includes(file.type)) throw new Error("Only PDF, JPG, PNG or WEBP files can be attached.");
+  if (file.size > ATTACH_MAX) throw new Error("The file is larger than 5 MB.");
+  const safe = String(file.name).replace(/[^\w.\-]+/g, "_").slice(-80);
+  const path = `${recordId}/${deviceId}/${Date.now()}-${safe}`;
+  const { error } = await supabase.storage.from(BUCKET).upload(path, file, { contentType: file.type, upsert: false });
+  if (error) throw error;
+  return { path, name: file.name, size: file.size, type: file.type, by: byUsername, at: new Date().toISOString() };
+}
+
+export async function deleteAttachmentFile(path) {
+  const { error } = await supabase.storage.from(BUCKET).remove([path]);
+  if (error) throw error;
+}
+
+/** A short-lived link to open an attachment (5 minutes). */
+export async function attachmentUrl(path) {
+  const { data, error } = await supabase.storage.from(BUCKET).createSignedUrl(path, 300);
+  if (error) throw error;
+  return data.signedUrl;
+}
+
+/** Live updates for the lists and the template. */
+export function subscribeHccConfig(onChange) {
+  let timer = null;
+  const ping = () => { clearTimeout(timer); timer = setTimeout(onChange, 400); };
+  const ch = supabase.channel("htms-hcc-config");
+  ["hcc_options", "hcc_report_template"].forEach(table =>
+    ch.on("postgres_changes", { event: "*", schema: "public", table }, ping));
+  ch.subscribe();
+  return () => { clearTimeout(timer); supabase.removeChannel(ch); };
 }
 
 // ── Patient-data encryption ────────────────────────────────────────────

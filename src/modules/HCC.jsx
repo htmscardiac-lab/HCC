@@ -4,15 +4,39 @@ import BarcodeInput from "../components/BarcodeScanner.jsx";
 import ChecklistRunner from "../components/ChecklistRunner.jsx";
 import { ChecklistViewer } from "./PPM.jsx";
 import { exportHCCList } from "../lib/exportRecords.js";
-import { printStickers, STICKER_SIZES, getStickerSize, setStickerSize } from "../lib/sticker.js";
+import { printStickers, STICKER } from "../lib/sticker.js";
+import DefectiveSection, { useHccConfig, DefectiveReviewModal, ReportViewModal, AttachmentList } from "../components/DefectiveReview.jsx";
 import RosterSection, { useRoster, OnDutyStrip } from "../components/Roster.jsx";
 
 const OVERDUE_H = 2;           // In Process: warn after two hours
 const OUTGOING_OVERDUE_H = 24; // Outgoing: warn after one day
 
-/** Hours a record has been sitting in Outgoing (falls back to entry time). */
-const outgoingHours = (r) => hoursAgo(r.outgoingAt || r.entryDate);
-const isOutgoingOverdue = (r) => outgoingHours(r) > OUTGOING_OVERDUE_H;
+/**
+ * HCC v2 — every device has its own stage, but a patient's devices always
+ * stay together under ONE record:
+ *
+ *   in_process ──working──▶ outgoing
+ *              └─defective─▶ defective_review ──admin decision──▶ outgoing
+ *
+ * A record appears in every tab where it has devices (showing only those
+ * devices), and is archived once ALL its devices are in Outgoing with Return
+ * or Report set.
+ */
+const stageOf = (r, d) =>
+  d.stage || (r.status === "outgoing" || r.status === "archived" ? "outgoing" : "in_process");
+const devsAt = (r, stage) => (r.devices || []).filter(d => stageOf(r, d) === stage);
+const isActive = (r) => r.status !== "archived";
+
+/** Where an inspection result sends a device. */
+const routed = (d, condition) => condition === "working"
+  ? { ...d, condition, stage: "outgoing", outgoingAt: ts() }
+  : { ...d, condition, stage: "defective_review", outgoingAt: "" };
+
+/** When the record's first device reached Outgoing (for the 1-day warning). */
+const outgoingSince = (r) => {
+  const t = devsAt(r, "outgoing").map(d => d.outgoingAt).filter(Boolean).sort()[0];
+  return t || r.outgoingAt || r.entryDate;
+};
 
 /**
  * Move a record back to an earlier stage (admin only).
@@ -25,13 +49,13 @@ const isOutgoingOverdue = (r) => outgoingHours(r) > OUTGOING_OVERDUE_H;
 function sendBack(setRecords, record, target, session) {
   setRecords(rs => rs.map(r => {
     if (r.id !== record.id) return r;
-    const from = r.status === "archived" ? "Archive"
-               : r.status === "outgoing" ? "Outgoing" : "In Process";
+    const from = r.status === "archived" ? "Archive" : "Outgoing";
     const to   = target === "in_process" ? "In Process" : "Outgoing";
 
     const next = {
       ...r,
-      status: target,
+      status: "in_process",          // active again
+      exitDate: "", exitBy: "",
       notes: [...(r.notes || []), {
         id: uid(),
         text: `Returned from ${from} to ${to}.`,
@@ -40,12 +64,12 @@ function sendBack(setRecords, record, target, session) {
         system: true,
       }],
     };
-    // Leaving Archive means it is no longer completed
-    if (target !== "archived") { next.exitDate = ""; next.exitBy = ""; }
-    // Going back to In Process means it is no longer waiting for collection
-    if (target === "in_process") next.outgoingAt = "";
-    // Arriving in Outgoing restarts the collection clock
-    if (target === "outgoing") next.outgoingAt = ts();
+    // Back to In Process: every device returns there; results are kept and
+    // can be re-run.
+    if (target === "in_process") {
+      next.outgoingAt = "";
+      next.devices = r.devices.map(d => ({ ...d, stage: "in_process", outgoingAt: "" }));
+    }
     return next;
   }));
 }
@@ -238,7 +262,10 @@ function RM({ r }) {
 function DI({ d }) {
   return (
     <div style={{ flex: 1, minWidth: 130 }}>
-      <div style={{ fontFamily: "var(--mono)", fontSize: 13, fontWeight: 600 }}>{d.htmSn}</div>
+      <div style={{ fontFamily: "var(--mono)", fontSize: 13, fontWeight: 600 }}>
+        {d.htmSn}
+        {d.deviceNo && <span className="badge badge-gray" style={{ marginLeft: 6, fontFamily: "var(--mono)" }}>{d.deviceNo}</span>}
+      </div>
       <div style={{ fontSize: 12, color: "var(--text3)", fontWeight: 500 }}>
         {d.deviceType}
         {d.model && <span style={{ fontFamily: "var(--mono)" }}> · {d.model}</span>}
@@ -251,6 +278,30 @@ function CB({ c }) {
   return <span className={"badge " + (c === "working" ? "badge-green" : "badge-red")}>
     {c === "working" ? "✓ Working" : "✗ Defective"}
   </span>;
+}
+
+/** Report / attachments buttons for a device that went through Defective Review. */
+function DecisionButtons({ d, isAdmin, onReport, onFiles, onDecide }) {
+  const hasDecision = d.report || d.ownedByHospital === true;
+  return (
+    <>
+      {d.report && (
+        <button className="btn-ghost btn-sm" onClick={onReport} title="View or print the defective-device report">
+          <Ic d={D.text} size={12} /> Report
+        </button>
+      )}
+      {d.ownedByHospital === true && (
+        <button className="btn-ghost btn-sm" onClick={onFiles} title="Hospital-owned — attached files">
+          <Ic d={D.copy} size={12} /> Files ({(d.attachments || []).length})
+        </button>
+      )}
+      {isAdmin && hasDecision && onDecide && (
+        <button className="btn-ghost btn-sm" onClick={onDecide} title="Change the decision, report or files">
+          <Ic d={D.pencil} size={12} /> Decision
+        </button>
+      )}
+    </>
+  );
 }
 
 function LiveClock({ onTick, manualRef }) {
@@ -330,19 +381,27 @@ function NotesModal({ record, session, onAdd, onDelete, onClose }) {
 export default function HCC({ records, setRecords, session, deviceTypes, templates, users = [] }) {
   const [tab, setTab] = useState("incoming");
   const roster = useRoster();
+  const { config: hccConfig, reload: reloadHccConfig } = useHccConfig();
 
   const hcc       = records.filter(r => r.module === "HCC");
-  const incoming  = hcc.filter(r => !r.status || r.status === "incoming");
-  const inProcess = hcc.filter(r => r.status === "in_process");
-  const outgoing  = hcc.filter(r => r.status === "outgoing");
+  const active    = hcc.filter(isActive);
+  const inProcess = active.filter(r => devsAt(r, "in_process").length);
+  const defective = active.filter(r => devsAt(r, "defective_review").length);
+  const outgoing  = active.filter(r => devsAt(r, "outgoing").length);
   const archived  = hcc.filter(r => r.status === "archived");
   const overdue   = inProcess.filter(r => hoursAgo(r.entryDate) > OVERDUE_H).length;
-  const outOverdue = outgoing.filter(r =>
-    hoursAgo(r.outgoingAt || r.entryDate) > OUTGOING_OVERDUE_H).length;
+  const outOverdue = outgoing.filter(r => hoursAgo(outgoingSince(r)) > OUTGOING_OVERDUE_H).length;
+  const defCount  = defective.reduce((n, r) => n + devsAt(r, "defective_review").length, 0);
+
+  /** Change one device (used by the Defective Review decision). */
+  const updateDevice = (rid, did, patch) =>
+    setRecords(rs => rs.map(r => r.id !== rid ? r : {
+      ...r, devices: r.devices.map(d => d.id !== did ? d : { ...d, ...patch }),
+    }));
 
   const stats = [
-    { label: "Incoming",   value: inProcess.length + outgoing.length, color: "var(--blue)" },
     { label: "In Process", value: inProcess.length, color: overdue > 0 ? "var(--orange)" : "var(--gold)", warn: overdue },
+    { label: "Defective Review", value: defCount, color: defCount > 0 ? "var(--red)" : "var(--text2)" },
     { label: "Outgoing",   value: outgoing.length,  color: outOverdue > 0 ? "var(--orange)" : "var(--green)", warn: outOverdue },
     { label: "Archived",   value: archived.length,  color: "var(--text2)" },
   ];
@@ -350,6 +409,7 @@ export default function HCC({ records, setRecords, session, deviceTypes, templat
   const tabs = [
     { key: "incoming",   label: "Incoming",   count: 0,                icon: D.inbox },
     { key: "in_process", label: "In Process", count: inProcess.length, icon: D.process, dot: overdue > 0 },
+    { key: "defective",  label: "Defective Review", count: defCount,   icon: D.warn, dot: defCount > 0 },
     { key: "outgoing",   label: "Outgoing",   count: outgoing.length,  icon: D.outgoing, dot: outOverdue > 0 },
     { key: "archive",    label: "Archive",    count: archived.length,  icon: D.archive },
     { key: "roster",     label: "On-Call",    count: 0,                icon: D.calendar },
@@ -385,8 +445,12 @@ export default function HCC({ records, setRecords, session, deviceTypes, templat
 
       {tab === "incoming"   && <IncomingSection   setRecords={setRecords} session={session} deviceTypes={deviceTypes} />}
       {tab === "in_process" && <InProcessSection  records={inProcess} setRecords={setRecords} session={session} templates={templates} deviceTypes={deviceTypes} />}
-      {tab === "outgoing"   && <OutgoingSection   records={outgoing}  setRecords={setRecords} session={session} deviceTypes={deviceTypes} templates={templates} />}
-      {tab === "archive"    && <ArchiveSection    records={archived}  setRecords={setRecords} session={session} deviceTypes={deviceTypes} />}
+      {tab === "defective"  && <DefectiveSection  records={defective} stageOf={stageOf} session={session} config={hccConfig}
+                                                  reloadConfig={reloadHccConfig} deviceTypes={deviceTypes} updateDevice={updateDevice} />}
+      {tab === "outgoing"   && <OutgoingSection   records={outgoing}  setRecords={setRecords} session={session} deviceTypes={deviceTypes} templates={templates}
+                                                  hccConfig={hccConfig} updateDevice={updateDevice} />}
+      {tab === "archive"    && <ArchiveSection    records={archived}  setRecords={setRecords} session={session} deviceTypes={deviceTypes}
+                                                  hccConfig={hccConfig} updateDevice={updateDevice} />}
       {tab === "roster"     && <RosterSection     roster={roster} users={users} session={session} />}
     </div>
   );
@@ -440,7 +504,7 @@ function IncomingSection({ setRecords, session, deviceTypes }) {
       createdBy: session.username, createdAt: ts(),
       devices: filled.map(d => ({
         ...d, condition: "", checklist: null,
-        returnChecked: false, reportChecked: false,
+        returnChecked: false, reportChecked: false, stage: "in_process",
         inspectionDate: "", inspectedBy: ""
       }))
     };
@@ -583,14 +647,15 @@ function InProcessSection({ records, setRecords, session, templates, deviceTypes
       if (r.id !== recordId) return r;
       return {
         ...r,
-        devices: r.devices.map(d => d.id !== device.id ? d : {
+        // The result routes the device at once: working → Outgoing,
+        // defective → Defective Review. It stays under this patient's record.
+        devices: r.devices.map(d => d.id !== device.id ? d : routed({
           ...d,
-          condition,
           // Re-running keeps the earlier result as a revision
           checklist: reviseChecklist(d.checklist, result, template, session),
           inspectionDate: ts(),
           inspectedBy: session.username
-        })
+        }, condition))
       };
     }));
     setRunner(null);
@@ -600,28 +665,12 @@ function InProcessSection({ records, setRecords, session, templates, deviceTypes
   const setCondition = (rid, did, condition) => {
     setRecords(rs => rs.map(r => r.id !== rid ? r : {
       ...r,
-      devices: r.devices.map(d => d.id !== did ? d : {
-        ...d, condition,
-        inspectionDate: condition ? ts() : "",
-        inspectedBy: condition ? session.username : ""
-      })
+      devices: r.devices.map(d => d.id !== did ? d : routed({
+        ...d,
+        inspectionDate: ts(),
+        inspectedBy: session.username
+      }, condition))
     }));
-  };
-
-  const moveChecked = (rid) => {
-    setRecords(rs => {
-      const rec = rs.find(r => r.id === rid);
-      if (!rec) return rs;
-      const done    = rec.devices.filter(d => d.condition);
-      const pending = rec.devices.filter(d => !d.condition);
-      if (done.length === 0) return rs;
-
-      if (pending.length === 0) {
-        return rs.map(r => r.id !== rid ? r : { ...r, status: "outgoing", outgoingAt: ts() });
-      }
-      const moved = { ...rec, id: uid(), status: "outgoing", outgoingAt: ts(), devices: done };
-      return rs.map(r => r.id !== rid ? r : { ...r, devices: pending }).concat([moved]);
-    });
   };
 
   const delRec = (rid) => {
@@ -630,7 +679,7 @@ function InProcessSection({ records, setRecords, session, templates, deviceTypes
 
   return (
     <div>
-      <SH title="In Process" sub="Run the inspection checklist for each device — the result sets its condition automatically" />
+      <SH title="In Process" sub="Run the checklist for each device — working devices move to Outgoing, defective ones to Defective Review" />
       <div style={{ marginBottom: 16 }}>
         <SearchBar value={q} onChange={setQ} placeholder="Search by MRN, name, HTM/SN, or device type…" />
       </div>
@@ -640,7 +689,8 @@ function InProcessSection({ records, setRecords, session, templates, deviceTypes
       {list.map(r => {
         const h = hoursAgo(r.entryDate);
         const isOverdue = h > OVERDUE_H;
-        const doneCount = r.devices.filter(d => d.condition).length;
+        const here = devsAt(r, "in_process");
+        const elsewhere = r.devices.length - here.length;
 
         return (
           <div key={r.id} className={"card" + (isOverdue ? " card-overdue" : "")}>
@@ -660,15 +710,18 @@ function InProcessSection({ records, setRecords, session, templates, deviceTypes
                   <Ic d={D.trash} size={13} /> Delete
                 </button>
               )}
-              <button className="btn-outline btn-sm" onClick={() => moveChecked(r.id)}
-                      style={{ opacity: doneCount ? 1 : .5 }}>
-                Move Inspected ({doneCount}) → Outgoing <Ic d={D.arrow} size={13} stroke="var(--green)" />
-              </button>
             </RH>
             <RM r={r} />
+            {elsewhere > 0 && (
+              <div style={{ fontSize: 11.5, color: "var(--text3)", marginTop: 6 }}>
+                {elsewhere} other device{elsewhere === 1 ? "" : "s"} of this patient already inspected
+                {devsAt(r, "outgoing").length ? ` · ${devsAt(r, "outgoing").length} in Outgoing` : ""}
+                {devsAt(r, "defective_review").length ? ` · ${devsAt(r, "defective_review").length} in Defective Review` : ""}
+              </div>
+            )}
 
             <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 12 }}>
-              {r.devices.map(d => (
+              {here.map(d => (
                 <div key={d.id} className="device-row">
                   <DI d={d} />
 
@@ -686,9 +739,17 @@ function InProcessSection({ records, setRecords, session, templates, deviceTypes
                       <span className="info-pill">
                         {fmt(d.inspectionDate)} · {d.inspectedBy}
                       </span>
-                      <button className="btn-ghost btn-sm" onClick={() => startChecklist(r.id, d)}>
-                        <Ic d={D.pencil} size={12} /> Re-run
+                      <button className="btn-primary btn-sm" onClick={() => startChecklist(r.id, d)}>
+                        <Ic d={D.pencil} size={12} stroke="#fff" /> Re-run
                       </button>
+                      {session.role === "admin" && (
+                        <button className="btn-ghost btn-sm" title="Send on using the current result"
+                                onClick={() => setRecords(rs => rs.map(x => x.id !== r.id ? x : {
+                                  ...x, devices: x.devices.map(y => y.id !== d.id ? y : routed(y, y.condition)),
+                                }))}>
+                          Send on <Ic d={D.arrow} size={12} />
+                        </button>
+                      )}
                     </>
                   ) : (
                     <>
@@ -738,20 +799,20 @@ function InProcessSection({ records, setRecords, session, templates, deviceTypes
 }
 
 // ── Outgoing ───────────────────────────────────────────────────────────
-function OutgoingSection({ records, setRecords, session, deviceTypes, templates }) {
+function OutgoingSection({ records, setRecords, session, deviceTypes, templates, hccConfig, updateDevice }) {
   const [q, setQ] = useState("");
   const [viewCl, setViewCl] = useState(null);
   const [edit, setEdit] = useState(null);
   const [notesId, setNotesId] = useState(null);
   const [runner, setRunner] = useState(null);   // admin re-running a checklist
-  const [size, setSize] = useState(getStickerSize);
   const [printHelp, setPrintHelp] = useState(false);
+  const [viewReport, setViewReport] = useState(null);   // { record, device }
+  const [files, setFiles] = useState(null);             // device with attachments
+  const [decide, setDecide] = useState(null);           // admin editing a decision
   const isAdmin = session.role === "admin";
 
-  const changeSize = (k) => { setStickerSize(k); setSize(k); };
-
-  /** Only inspected devices carry a status worth putting on a sticker. */
-  const printable = (r) => (r.devices || []).filter(d => d.condition);
+  /** Devices of this record that are in Outgoing and carry a result. */
+  const printable = (r) => devsAt(r, "outgoing").filter(d => d.condition);
 
   const findTemplate = (deviceType) =>
     templates.find(t => t.module === "HCC" && t.deviceType === deviceType) || null;
@@ -770,12 +831,18 @@ function OutgoingSection({ records, setRecords, session, deviceTypes, templates 
     const condition = result.summary.overall === "pass" ? "working" : "defective";
     setRecords(rs => rs.map(r => r.id !== recordId ? r : {
       ...r,
-      devices: r.devices.map(d => d.id !== device.id ? d : {
-        ...d,
-        condition,
-        checklist: reviseChecklist(d.checklist, result, template, session),
-        inspectionDate: ts(),
-        inspectedBy: session.username,
+      devices: r.devices.map(d => {
+        if (d.id !== device.id) return d;
+        const next = {
+          ...d,
+          condition,
+          checklist: reviseChecklist(d.checklist, result, template, session),
+          inspectionDate: ts(),
+          inspectedBy: session.username,
+        };
+        // Newly found defective, with no decision yet → Defective Review
+        const undecided = !d.report && (d.ownedByHospital === null || d.ownedByHospital === undefined);
+        return condition === "defective" && undecided ? routed(next, "defective") : next;
       })
     }));
     setRunner(null);
@@ -798,11 +865,10 @@ function OutgoingSection({ records, setRecords, session, deviceTypes, templates 
     if (!q) return true;
     const s = q.toLowerCase();
     return r.mrn.toLowerCase().includes(s) || (r.patientName || "").toLowerCase().includes(s)
-        || r.devices.some(d => d.htmSn.toLowerCase().includes(s));
+        || r.devices.some(d => d.htmSn.toLowerCase().includes(s) || (d.deviceNo || "").toLowerCase().includes(s));
   })
   // Longest waiting first, so anything overdue for collection is at the top.
-  .slice().sort((a, b) =>
-    new Date(a.outgoingAt || a.entryDate || 0) - new Date(b.outgoingAt || b.entryDate || 0));
+  .slice().sort((a, b) => new Date(outgoingSince(a) || 0) - new Date(outgoingSince(b) || 0));
 
   const toggle = (rid, did, field) => {
     setRecords(rs => rs.map(r => r.id !== rid ? r : {
@@ -813,6 +879,15 @@ function OutgoingSection({ records, setRecords, session, deviceTypes, templates 
   const complete = (rid) => {
     const rec = records.find(r => r.id === rid);
     if (!rec) return;
+    const notHere = rec.devices.filter(d => stageOf(rec, d) !== "outgoing");
+    if (notHere.length > 0) {
+      window.alert(
+        "لا يمكن الأرشفة قبل وصول كل أجهزة المريض إلى Outgoing.\n" +
+        "All of this patient's devices must reach Outgoing before archiving.\n\n" +
+        "Still in progress: " + notHere.map(d => d.deviceNo || d.htmSn).join(", ")
+      );
+      return;
+    }
     const pending = rec.devices.filter(d => !d.returnChecked && !d.reportChecked);
     if (pending.length > 0) {
       window.alert(
@@ -832,16 +907,9 @@ function OutgoingSection({ records, setRecords, session, deviceTypes, templates 
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
         <SH title="Outgoing" sub="Mark Return and Report for every device before archiving" />
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-          <span style={{ fontSize: 11.5, color: "var(--text3)", fontWeight: 600, whiteSpace: "nowrap" }}>
-            Sticker size
+          <span className="info-pill" title="Must match the label size set in Print Service by Honeywell">
+            Sticker {STICKER.label}
           </span>
-          <select value={size} onChange={e => changeSize(e.target.value)}
-                  title="Saved on this phone — must match the label size set in Print Service by Honeywell"
-                  style={{ width: "auto", minWidth: 200, fontSize: 13 }}>
-            {Object.entries(STICKER_SIZES).map(([k, v]) => (
-              <option key={k} value={k}>{v.label}</option>
-            ))}
-          </select>
           <button className="btn-ghost btn-sm" onClick={() => setPrintHelp(true)} title="Printer setup">
             <Ic d={D.warn} size={13} /> Setup
           </button>
@@ -854,10 +922,11 @@ function OutgoingSection({ records, setRecords, session, deviceTypes, templates 
       {list.length === 0 && <Empty label="Nothing outgoing" />}
 
       {list.map(r => {
-        const pending = r.devices.filter(d => !d.returnChecked && !d.reportChecked).length;
-        // Waiting time starts when the record reached Outgoing; older records
-        // saved before that stamp existed fall back to their entry date.
-        const waited = hoursAgo(r.outgoingAt || r.entryDate);
+        const here = devsAt(r, "outgoing");
+        const notHere = r.devices.length - here.length;
+        const pending = here.filter(d => !d.returnChecked && !d.reportChecked).length + notHere;
+        // Waiting time starts when the first device reached Outgoing
+        const waited = hoursAgo(outgoingSince(r));
         const isOverdue = waited > OUTGOING_OVERDUE_H;
         return (
           <div key={r.id} className={"card" + (isOverdue ? " card-overdue" : "")}>
@@ -873,7 +942,7 @@ function OutgoingSection({ records, setRecords, session, deviceTypes, templates 
                 {(r.notes || []).length > 0 && <span className="count-dot">{r.notes.length}</span>}
               </button>
               <button className="btn-blue btn-sm"
-                      onClick={() => printStickers(r, printable(r), size)}
+                      onClick={() => printStickers(r, printable(r))}
                       disabled={printable(r).length === 0}
                       style={{ opacity: printable(r).length ? 1 : .5 }}
                       title="Print one sticker for every inspected device on this record">
@@ -912,9 +981,18 @@ function OutgoingSection({ records, setRecords, session, deviceTypes, templates 
               </button>
             </RH>
             <RM r={r} />
+            {notHere > 0 && (
+              <div className="alert alert-warn" style={{ marginTop: 8, marginBottom: 0, fontSize: 12 }}>
+                <Ic d={D.clock} size={13} />
+                {notHere} more device{notHere === 1 ? "" : "s"} of this patient still in
+                {devsAt(r, "in_process").length ? " In Process" : ""}
+                {devsAt(r, "in_process").length && devsAt(r, "defective_review").length ? " /" : ""}
+                {devsAt(r, "defective_review").length ? " Defective Review" : ""} — they will join here.
+              </div>
+            )}
 
             <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 12 }}>
-              {r.devices.map(d => (
+              {here.map(d => (
                 <div key={d.id} className="device-row">
                   <DI d={d} />
                   {d.condition && <CB c={d.condition} />}
@@ -924,9 +1002,13 @@ function OutgoingSection({ records, setRecords, session, deviceTypes, templates 
                       <Ic d={D.list} size={12} /> Checklist
                     </button>
                   )}
+                  <DecisionButtons d={d} r={r} isAdmin={isAdmin}
+                                   onReport={() => setViewReport({ record: r, device: d })}
+                                   onFiles={() => setFiles(d)}
+                                   onDecide={() => setDecide({ record: r, device: d })} />
                   {d.condition && (
                     <button className="btn-blue btn-sm" title="Print a sticker for this device"
-                            onClick={() => printStickers(r, [d], size)}>
+                            onClick={() => printStickers(r, [d])}>
                       <Ic d={D.copy} size={12} stroke="#fff" /> Print
                     </button>
                   )}
@@ -950,6 +1032,23 @@ function OutgoingSection({ records, setRecords, session, deviceTypes, templates 
           </div>
         );
       })}
+
+      {viewReport && (
+        <ReportViewModal record={viewReport.record} device={viewReport.device} template={hccConfig?.template}
+                         onEdit={isAdmin ? () => { setDecide(viewReport); setViewReport(null); } : null}
+                         onClose={() => setViewReport(null)} />
+      )}
+      {files && (
+        <Modal title={`Attachments — ${files.deviceNo || files.htmSn}`} onClose={() => setFiles(null)}
+          footer={<button className="btn-ghost" onClick={() => setFiles(null)}>Close</button>}>
+          <AttachmentList items={files.attachments || []} />
+        </Modal>
+      )}
+      {decide && (
+        <DefectiveReviewModal record={decide.record} device={decide.device} session={session} config={hccConfig} mode="edit"
+                              onSave={(patch) => updateDevice(decide.record.id, decide.device.id, patch)}
+                              onClose={() => setDecide(null)} />
+      )}
 
       {runner && (
         <ChecklistRunner
@@ -988,7 +1087,7 @@ function OutgoingSection({ records, setRecords, session, deviceTypes, templates 
               ["Turn the service on",
                "Phone Settings → Connections → Printing → enable “Print Service by Honeywell”, then ⋮ → Add printer and select your RP2."],
               ["Set the label size",
-               "In the print service, set the media size to the same label you chose above. If the two differ, the sticker will be cut in the wrong place."],
+               "In the print service, set the media size to 40 × 12 mm. If it differs, the sticker will be cut in the wrong place."],
               ["Print",
                "Tap Print on any device here, then pick the RP2 in the print dialog."],
             ].map(([h, d], i) => (
@@ -1019,8 +1118,12 @@ function OutgoingSection({ records, setRecords, session, deviceTypes, templates 
 }
 
 // ── Archive ────────────────────────────────────────────────────────────
-function ArchiveSection({ records, setRecords, session, deviceTypes }) {
+function ArchiveSection({ records, setRecords, session, deviceTypes, hccConfig, updateDevice }) {
   const [q, setQ] = useState("");
+  const [viewReport, setViewReport] = useState(null);
+  const [files, setFiles] = useState(null);
+  const [decide, setDecide] = useState(null);
+  const isAdmin = session.role === "admin";
   const [cond, setCond] = useState("all");
   const [viewCl, setViewCl] = useState(null);
   const [edit, setEdit] = useState(null);
@@ -1043,7 +1146,8 @@ function ArchiveSection({ records, setRecords, session, deviceTypes }) {
     if (!q) return true;
     const s = q.toLowerCase();
     return r.mrn.toLowerCase().includes(s) || (r.patientName || "").toLowerCase().includes(s)
-        || r.devices.some(d => d.htmSn.toLowerCase().includes(s) || d.deviceType.toLowerCase().includes(s));
+        || r.devices.some(d => d.htmSn.toLowerCase().includes(s) || d.deviceType.toLowerCase().includes(s)
+                             || (d.deviceNo || "").toLowerCase().includes(s));
   })
   // Most recently archived first — a record archived today belongs at the top
   // even if it was registered weeks ago.
@@ -1132,6 +1236,10 @@ function ArchiveSection({ records, setRecords, session, deviceTypes }) {
                     <Ic d={D.list} size={12} /> Checklist
                   </button>
                 )}
+                <DecisionButtons d={d} isAdmin={isAdmin}
+                                 onReport={() => setViewReport({ record: r, device: d })}
+                                 onFiles={() => setFiles(d)}
+                                 onDecide={() => setDecide({ record: r, device: d })} />
                 {d.returnChecked && <span className="badge badge-blue">Return ✓</span>}
                 {d.reportChecked && <span className="badge badge-gold">Report ✓</span>}
                 <span className="info-pill">Insp: {fmt(d.inspectionDate)} · {d.inspectedBy}</span>
@@ -1141,6 +1249,22 @@ function ArchiveSection({ records, setRecords, session, deviceTypes }) {
         </div>
       ))}
 
+      {viewReport && (
+        <ReportViewModal record={viewReport.record} device={viewReport.device} template={hccConfig?.template}
+                         onEdit={isAdmin ? () => { setDecide(viewReport); setViewReport(null); } : null}
+                         onClose={() => setViewReport(null)} />
+      )}
+      {files && (
+        <Modal title={`Attachments — ${files.deviceNo || files.htmSn}`} onClose={() => setFiles(null)}
+          footer={<button className="btn-ghost" onClick={() => setFiles(null)}>Close</button>}>
+          <AttachmentList items={files.attachments || []} />
+        </Modal>
+      )}
+      {decide && (
+        <DefectiveReviewModal record={decide.record} device={decide.device} session={session} config={hccConfig} mode="edit"
+                              onSave={(patch) => updateDevice(decide.record.id, decide.device.id, patch)}
+                              onClose={() => setDecide(null)} />
+      )}
       {viewCl && <ChecklistViewer record={viewCl} onClose={() => setViewCl(null)} />}
       {edit && (
         <EditRecordModal record={edit} deviceTypes={deviceTypes}
