@@ -85,6 +85,10 @@ export const STYLE = `
   .stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius2); padding: 14px 18px; display: flex; flex-direction: column; gap: 4px; box-shadow: var(--shadow); position: relative; overflow: hidden; }
   .stat-card::before { content:''; position: absolute; top:0; left:0; right:0; height:3px; background: var(--sbar,#1a6b3c); }
   .stat-value { font-family: var(--mono); font-size: 30px; font-weight: 600; line-height: 1; }
+  .lh-break { display: none; }
+  .lh-ar, .lh-en, .lh-user > div, .lh-logout { white-space: nowrap; }
+  @media (max-width: 1400px) { .lh-htms-text, .lh-brand > .lh-divider { display: none; } }
+  @media (max-width: 1150px) { .app-header .header-actions button span { display: none; } }
   .stat-label { font-size: 11px; color: var(--text3); text-transform: uppercase; letter-spacing: .06em; font-weight: 700; }
   /* Stat cards that double as the page's navigation */
   .nav-cards { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; margin-bottom: 20px; }
@@ -194,5 +198,20 @@ export const STYLE = `
     .app-header .header-actions { width: 100%; justify-content: flex-start; gap: 6px; flex-wrap: wrap; }
     .app-header .header-actions button span { display: none; }
     .app-header .header-actions button { padding: 9px 11px; }
+
+    /* Launcher header: one tidy brand row, then user + actions */
+    .app-header .lh-brand { width: 100%; gap: 10px !important; }
+    .app-header .lh-brand img { width: 40px !important; height: 40px !important; }
+    .app-header .lh-names { flex: 1; min-width: 0; }
+    .app-header .lh-ar { font-size: 13.5px !important; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .app-header .lh-en { font-size: 11px !important; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .app-header .lh-divider, .app-header .lh-htms-text { display: none; }
+    .app-header .header-actions { border-top: 1px solid rgba(255,255,255,.12); padding-top: 8px; }
+    .app-header .lh-user { order: -4; text-align: left !important; min-width: 0; }
+    .app-header .lh-user > div:first-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .app-header .lh-role { order: -3; }
+    .app-header .lh-logout { order: -2; margin-left: auto; }
+    .app-header .lh-break { display: block; order: -1; flex-basis: 100%; height: 0; }
+    .app-header .header-actions:has(.lh-break) > button:not(.lh-logout) { flex: 1; justify-content: center; }
   }
 `;
