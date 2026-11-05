@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { Ic, D, Modal, fmt, Empty, SL } from "../lib/utils.jsx";
-import { friendlyError } from "../lib/supabase.js";
+import { friendlyError, passwordProblem } from "../lib/supabase.js";
 import * as api from "../lib/api.js";
 
 /**
@@ -29,7 +29,7 @@ export function SignupModal({ onClose, onActivated }) {
     if (!/^[a-zA-Z0-9._-]+$/.test(f.username.trim()))
       { setErr("Username may contain letters, numbers, dot, dash and underscore only."); return; }
     if (!f.password)         { setErr("Password is required."); return; }
-    if (f.password.length < 6) { setErr("Password must be at least 6 characters."); return; }
+    if (passwordProblem(f.password)) { setErr(passwordProblem(f.password)); return; }
     if (f.password !== f.confirm) { setErr("The two passwords do not match."); return; }
 
     setBusy(true);

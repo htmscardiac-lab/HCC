@@ -37,7 +37,7 @@ const MODULES = [
 ];
 
 export default function Launcher({ session, onPick, onLogout, stats,
-                                   onUsers, onBuilder, onLists, pendingCount = 0 }) {
+                                   onUsers, onBuilder, onLists, onVault, vaultOff = false, pendingCount = 0 }) {
   const modules = MODULES.filter(m => !m.adminOnly || session.role === "admin");
   const isAdmin = session.role === "admin";
   return (
@@ -71,6 +71,10 @@ export default function Launcher({ session, onPick, onLogout, stats,
               <button onClick={onLists} title="Manage dropdown lists" style={hBtn}>
                 <Ic d={D.chip} size={14} stroke="#fff" />
                 <span style={{ fontSize: 12 }}>Lists</span>
+              </button>
+              <button onClick={onVault} title="Patient-data encryption" style={hBtn}>
+                <Ic d={D.key} size={14} stroke={vaultOff ? "var(--gold-mid)" : "#fff"} />
+                <span style={{ fontSize: 12 }}>Encryption</span>
               </button>
               <button onClick={onUsers} title="User Management" style={{ ...hBtn, position: "relative" }}>
                 <Ic d={D.users} size={14} stroke="#fff" />
@@ -109,6 +113,12 @@ export default function Launcher({ session, onPick, onLogout, stats,
       {/* Body */}
       <main style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: "40px 24px" }}>
         <div style={{ width: "100%", maxWidth: 1000 }}>
+          {vaultOff && (
+            <div className="alert alert-warn" style={{ marginBottom: 22, cursor: "pointer" }} onClick={onVault}>
+              <Ic d={D.key} size={14} />
+              Patient MRN, name and phone are not encrypted yet. Click here to switch on encryption.
+            </div>
+          )}
           <div style={{ textAlign: "center", marginBottom: 36 }}>
             <h1 style={{ fontSize: 27, fontWeight: 800, color: "var(--green3)", marginBottom: 7 }}>
               Select a Module
