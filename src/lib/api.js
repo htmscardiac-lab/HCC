@@ -1,4 +1,5 @@
-import { supabase, signupClient, emailFor } from "./supabase.js";
+import { supabase, signupClient, emailFor, passwordProblem } from "./supabase.js";
+import * as V from "./vault.js";
 
 /**
  * Data access layer between the React app and Supabase.
@@ -45,11 +46,12 @@ export async function signIn(username, password) {
   // Resolve the username to the address the account actually signs in with.
   // They differ whenever an admin has renamed the account, so we never assume
   // the address matches the current username.
+  // A narrow server function returns only the sign-in address — signed-out
+  // visitors cannot read the profiles table itself.
   let loginEmail = emailFor(uname);
   try {
-    const { data: p } = await supabase
-      .from("profiles").select("auth_email").eq("username", uname).maybeSingle();
-    if (p?.auth_email) loginEmail = p.auth_email;
+    const { data: addr } = await supabase.rpc("login_email", { p_username: uname });
+    if (addr) loginEmail = addr;
   } catch { /* fall back to the derived address */ }
 
   const { data, error } = await supabase.auth.signInWithPassword({
@@ -103,9 +105,10 @@ export const signOut = () => supabase.auth.signOut();
  */
 export async function requestAccount({ name, username, email, password, reason }) {
   const uname = username.trim().toLowerCase();
+  const weak = passwordProblem(password);
+  if (weak) throw new Error(weak);
 
-  const { data: taken } = await supabase
-    .from("profiles").select("id").eq("username", uname).maybeSingle();
+  const { data: taken } = await supabase.rpc("username_taken", { p_username: uname });
   if (taken) throw new Error("That username is already taken.");
 
   const { data, error } = await supabase.auth.signUp({
@@ -139,6 +142,8 @@ export async function requestAccount({ name, username, email, password, reason }
  */
 export async function createUser({ name, username, password, role }) {
   const uname = username.trim().toLowerCase();
+  const weak = passwordProblem(password);
+  if (weak) throw new Error(weak);
 
   const { data: taken } = await supabase
     .from("profiles").select("id").eq("username", uname).maybeSingle();
@@ -170,8 +175,8 @@ export async function createUser({ name, username, password, role }) {
  * server that the caller really is an active admin.
  */
 export async function changePassword(user, newPassword) {
-  if (String(newPassword).length < 6)
-    throw new Error("Password should be at least 6 characters.");
+  const weak = passwordProblem(newPassword);
+  if (weak) throw new Error(weak);
 
   const { data } = await supabase.auth.getUser();
   const isSelf = data?.user && data.user.id === user.id;
@@ -503,7 +508,7 @@ function toIso(v) {
   return isNaN(d.getTime()) ? null : d.toISOString();
 }
 
-function recordRow(r) {
+async function recordRow(r) {
   const base = {
     id: r.id,
     module: r.module,
@@ -514,11 +519,12 @@ function recordRow(r) {
   if (r.module === "HCC") {
     return {
       ...base,
-      mrn: orNull(r.mrn),
-      patient_name: orNull(r.patientName),
+      // Patient identifiers are encrypted in the browser before saving
+      mrn: orNull(await V.seal(r.mrn)),
+      patient_name: orNull(await V.seal(r.patientName)),
       patient_type: orNull(r.patientType),
       ward: r.ward || "",
-      phone: r.phone || "",
+      phone: (await V.seal(r.phone || "")) || "",
       status: orNull(r.status),
       entry_date: toIso(r.entryDate),
       exit_date: toIso(r.exitDate),
@@ -588,15 +594,15 @@ const deviceFromRow = (d) => ({
   inspectedBy: d.inspected_by ? nameOf(d.inspected_by) : "",
 });
 
-function recordFromRow(row, devices) {
+async function recordFromRow(row, devices) {
   if (row.module === "HCC") {
     return {
       id: row.id, module: "HCC",
-      mrn: row.mrn || "",
-      patientName: row.patient_name || "",
+      mrn: (await V.open(row.mrn)) || "",
+      patientName: (await V.open(row.patient_name)) || "",
       patientType: row.patient_type || "outpatient",
       ward: row.ward || "",
-      phone: row.phone || "",
+      phone: (await V.open(row.phone)) || "",
       status: row.status || "in_process",
       entryDate: row.entry_date || row.created_at,
       exitDate: row.exit_date || "",
@@ -658,7 +664,7 @@ export async function loadRecords() {
     byRecord.get(d.record_id).push(d);
   });
 
-  return (rec.data || []).map(r => recordFromRow(r, byRecord.get(r.id) || []));
+  return Promise.all((rec.data || []).map(r => recordFromRow(r, byRecord.get(r.id) || [])));
 }
 
 /**
@@ -695,7 +701,7 @@ export async function syncRecords(prev, next) {
         !== JSON.stringify({ ...r, devices: undefined });
   });
   if (changed.length) {
-    const { error } = await supabase.from("records").upsert(changed.map(recordRow));
+    const { error } = await supabase.from("records").upsert(await Promise.all(changed.map(recordRow)));
     if (error) throw error;
   }
 
@@ -726,6 +732,68 @@ export async function syncRecords(prev, next) {
   }
 }
 
+// ── Patient-data encryption ────────────────────────────────────────────
+
+/**
+ * The encryption settings, or null when encryption has not been set up.
+ * { missing: true } when the database update (vault_config) has not been run.
+ */
+export async function loadVaultConfig() {
+  const { data, error } = await supabase.from("vault_config").select("*").eq("id", 1).maybeSingle();
+  if (error) {
+    if (/vault_config|does not exist|Could not find|PGRST205|42P01/i.test(error.message || "")) return { missing: true };
+    throw error;
+  }
+  return data ? { salt: data.salt, iterations: data.iterations, verifier: data.verifier } : null;
+}
+
+/**
+ * Set up or change the team passphrase.
+ *
+ * Every HCC record's MRN, name and phone is read, decrypted with the current
+ * key (or taken as is when still plain), encrypted with the new key, and sent
+ * together with the new settings in ONE database transaction (vault_apply).
+ * Returns the number of records written.
+ */
+export async function applyVault(newPassphrase, onProgress = () => {}) {
+  const oldKey = V.currentKey();
+  onProgress("Preparing the new key…");
+  const { config, key } = await V.newConfig(newPassphrase);
+
+  onProgress("Reading records…");
+  const { data, error } = await supabase
+    .from("records").select("id, mrn, patient_name, phone").eq("module", "HCC");
+  if (error) throw error;
+
+  const plain = async (v) => {
+    if (!V.isEncrypted(v)) return v;
+    if (!oldKey) throw new Error("Unlock with the current passphrase first.");
+    return V.decryptWith(oldKey, v);   // throws if any value is unreadable — nothing is changed
+  };
+  const enc = async (v) => (v === null || v === undefined || v === "" ? v : V.encryptWith(key, v));
+
+  const rows = [];
+  for (let i = 0; i < (data || []).length; i++) {
+    const r = data[i];
+    rows.push({
+      id: r.id,
+      mrn: await enc(await plain(r.mrn)),
+      patient_name: await enc(await plain(r.patient_name)),
+      phone: await enc(await plain(r.phone)),
+    });
+    if (i % 25 === 0) onProgress(`Encrypting ${i + 1} of ${data.length}…`);
+  }
+
+  onProgress("Saving…");
+  const { data: n, error: e2 } = await supabase.rpc("vault_apply", {
+    p_rows: rows, p_salt: config.salt, p_iterations: config.iterations, p_verifier: config.verifier,
+  });
+  if (e2) throw e2;
+
+  await V.adopt(key, config);
+  return n ?? rows.length;
+}
+
 // ── Realtime ───────────────────────────────────────────────────────────
 
 /**
@@ -741,7 +809,7 @@ export function subscribeAll(onChange) {
 
   const channel = supabase.channel("htms-sync");
   ["records", "devices", "checklist_templates", "device_types",
-   "device_models", "cm_actions", "profiles", "signup_requests"]
+   "device_models", "cm_actions", "profiles", "signup_requests", "vault_config"]
     .forEach(table =>
       channel.on("postgres_changes", { event: "*", schema: "public", table }, ping)
     );

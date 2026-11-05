@@ -52,6 +52,18 @@ export const AUTH_DOMAIN = "htms.local";
 export const emailFor = (username) =>
   `${String(username).trim().toLowerCase()}@${AUTH_DOMAIN}`;
 
+/**
+ * The one password rule used everywhere a password is set: at least 8
+ * characters, with at least one letter and one number. Returns the problem as
+ * a message, or "" when the password is acceptable.
+ */
+export const PASSWORD_RULE = "Password must be at least 8 characters and include a letter and a number.";
+export function passwordProblem(pw) {
+  const p = String(pw || "");
+  if (p.length < 8 || !/[A-Za-z]/.test(p) || !/[0-9]/.test(p)) return PASSWORD_RULE;
+  return "";
+}
+
 /** Turn a Supabase error into a short message suitable for the UI. */
 export function friendlyError(error) {
   if (!error) return "";
@@ -65,7 +77,8 @@ export function friendlyError(error) {
            "Turn it off under Authentication → Sign In / Providers → Email.";
   if (/row-level security|permission denied/i.test(m))
     return "You do not have permission to do that. Ask an administrator.";
-  if (/Password should be/i.test(m)) return "Password must be at least 6 characters.";
+  if (/Password should be|weak password|password.*(short|characters)/i.test(m)) return PASSWORD_RULE;
+  if (/rate limit|too many/i.test(m)) return "Too many attempts. Wait a few minutes, then try again.";
   if (/Email address .* is invalid/i.test(m))
     return "The server rejected the generated address. Contact the administrator.";
   return m;
