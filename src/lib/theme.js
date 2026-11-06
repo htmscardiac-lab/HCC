@@ -87,8 +87,9 @@ export const STYLE = `
   .stat-value { font-family: var(--mono); font-size: 30px; font-weight: 600; line-height: 1; }
   .lh-break { display: none; }
   .lh-ar, .lh-en, .lh-user > div, .lh-logout { white-space: nowrap; }
-  @media (max-width: 1400px) { .lh-htms-text, .lh-brand > .lh-divider { display: none; } }
-  @media (max-width: 1150px) { .app-header .header-actions button span { display: none; } }
+  .app-header .header-actions button { white-space: nowrap; }
+  @media (max-width: 1650px) { .lh-htms-text, .lh-brand > .lh-divider { display: none; } }
+  @media (max-width: 1320px) { .app-header .header-actions button span { display: none; } }
   .stat-label { font-size: 11px; color: var(--text3); text-transform: uppercase; letter-spacing: .06em; font-weight: 700; }
   /* Stat cards that double as the page's navigation */
   .nav-cards { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; margin-bottom: 20px; }

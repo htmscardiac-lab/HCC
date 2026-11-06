@@ -9,6 +9,7 @@ import * as api from "./lib/api.js";
 import Launcher from "./components/Launcher.jsx";
 import ChecklistBuilder from "./components/ChecklistBuilder.jsx";
 import ListsManager from "./components/ListsManager.jsx";
+import { FaultyPartsAdmin } from "./components/DefectiveReview.jsx";
 import { SignupModal, RequestsPanel } from "./components/SignupRequest.jsx";
 import { UnlockScreen, VaultModal } from "./components/Vault.jsx";
 import * as V from "./lib/vault.js";
@@ -61,6 +62,7 @@ export default function App() {
   const [showUsers,   setShowUsers]   = useState(false);
   const [showBuilder, setShowBuilder] = useState(false);
   const [showLists,   setShowLists]   = useState(false);
+  const [showFaults,  setShowFaults]  = useState(false);
   const [showVault,   setShowVault]   = useState(false);
 
   // Patient-data encryption: checking | off | missing | locked | ready
@@ -271,6 +273,9 @@ export default function App() {
                       cmActions={cmActions} setCmActions={setCmActions}
                       onClose={() => setShowLists(false)} />
       )}
+      {showFaults && (
+        <FaultyPartsAdmin deviceTypes={dtypes.HCC || []} onClose={() => setShowFaults(false)} />
+      )}
     </>
   );
 
@@ -289,6 +294,7 @@ export default function App() {
                   onUsers={() => setShowUsers(true)}
                   onBuilder={() => setShowBuilder(true)}
                   onLists={() => setShowLists(true)}
+                  onFaults={() => setShowFaults(true)}
                   onVault={() => setShowVault(true)}
                   vaultOff={session.role === "admin" && vault.status !== "ready"}
                   pendingCount={pendingCount} />
@@ -314,6 +320,7 @@ export default function App() {
           onUsers={() => setShowUsers(true)}
           onBuilder={() => setShowBuilder(true)}
           onLists={() => setShowLists(true)}
+                  onFaults={() => setShowFaults(true)}
           onVault={() => setShowVault(true)}
           vaultOn={vault.status === "ready"}
           pendingCount={pendingCount}
@@ -408,8 +415,16 @@ function ErrorBar({ message, onClose }) {
   );
 }
 
+// Users list order: active before suspended, admins before users, then
+// oldest account first.
+const sortUsers = (list) => [...list].sort((a, b) =>
+  (a.isActive === false) - (b.isActive === false) ||
+  (a.role !== "admin") - (b.role !== "admin") ||
+  String(a.createdAt || "\uffff").localeCompare(String(b.createdAt || "\uffff"))
+);
+
 // ── Header ─────────────────────────────────────────────────────────────
-function AppHeader({ session, module, meta, onBack, onLogout, onUsers, onBuilder, onLists, onVault, vaultOn, pendingCount }) {
+function AppHeader({ session, module, meta, onBack, onLogout, onUsers, onBuilder, onLists, onFaults, onVault, vaultOn, pendingCount }) {
   return (
     <header className="app-header" style={{
       background: "var(--green3)", borderBottom: "3px solid var(--gold)",
@@ -457,6 +472,10 @@ function AppHeader({ session, module, meta, onBack, onLogout, onUsers, onBuilder
             <button onClick={onLists} title="Manage dropdown lists" style={hBtn}>
               <Ic d={D.chip} size={14} stroke="#fff" />
               <span style={{ fontSize: 12 }}>Lists</span>
+            </button>
+            <button onClick={onFaults} title="Faulty parts and failure types (HCC)" style={hBtn}>
+              <Ic d={D.wrench} size={14} stroke="#fff" />
+              <span style={{ fontSize: 12 }}>Faulty Parts</span>
             </button>
             <button onClick={onVault} title={vaultOn ? "Patient data encrypted" : "Patient data NOT encrypted"} style={hBtn}>
               <Ic d={D.key} size={14} stroke={vaultOn ? "#fff" : "var(--gold-mid)"} />
@@ -666,7 +685,7 @@ function UsersModal({ users, session, requests, reload, onError, onClose }) {
           </button>
         </div>
 
-        {users.map(x => (
+        {sortUsers(users).map(x => (
           <div key={x.id} style={{
             background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: 8,
             padding: "12px 14px", marginBottom: 8, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap"

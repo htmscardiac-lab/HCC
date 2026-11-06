@@ -35,10 +35,8 @@ export function useHccConfig() {
   return { config, reload };
 }
 
-const failuresFor = (config, type) => [
-  ...((config?.failures?.common) || []),
-  ...((config?.failures?.byType?.[type]) || []),
-].map(f => f.name);
+// Parts of one device type, each with its own failure types
+const partsFor = (config, type) => config?.parts?.[type] || [];
 
 // ── Report preview (rendered exactly as it prints) ─────────────────────
 export function ReportPreview({ record, device, template, report, height = "62vh" }) {
@@ -105,8 +103,9 @@ export function AttachmentList({ items = [], onRemove }) {
  */
 export function DefectiveReviewModal({ record, device, session, config, mode = "review", onSave, onClose }) {
   const template = withDefaults(config?.template);
-  const partNames = (config?.parts?.[device.deviceType] || []).map(p => p.name);
-  const failureNames = failuresFor(config, device.deviceType);
+  const partList = partsFor(config, device.deviceType);
+  const partNames = partList.map(p => p.name);
+  const failuresOf = (n) => (partList.find(p => p.name === n)?.failures || []).map(f => f.name);
   const recs = (config?.recommendations || []).map(r => r.name);
 
   // Devices not owned by the hospital need manufacturer and model on the
@@ -299,7 +298,7 @@ export function DefectiveReviewModal({ record, device, session, config, mode = "
           <SL>Faulty parts — {device.deviceType}</SL>
           {partNames.length === 0 && (
             <div className="alert alert-warn" style={{ marginTop: 8 }}>
-              <Ic d={D.warn} size={13} /> No parts are listed for {device.deviceType}. Add them in Fault Lists, or use "Other part" below.
+              <Ic d={D.warn} size={13} /> No parts are listed for {device.deviceType}. Add them in Faulty Parts, or use "Other part" below.
             </div>
           )}
           <div style={{ display: "flex", flexDirection: "column", gap: 6, margin: "10px 0" }}>
@@ -316,10 +315,17 @@ export function DefectiveReviewModal({ record, device, session, config, mode = "
                   </label>
                   {p.on && (
                     <div className="grid-2" style={{ marginTop: 8 }}>
-                      <select value={p.failure || ""} onChange={e => setPart(n, "failure", e.target.value)}>
-                        <option value="">Failure type…</option>
-                        {failureNames.map(f => <option key={f} value={f}>{f}</option>)}
-                      </select>
+                      {failuresOf(n).length > 0 ? (
+                        <select value={p.failure || ""} onChange={e => setPart(n, "failure", e.target.value)}>
+                          <option value="">Failure type…</option>
+                          {/* keep a saved value even if it was later removed from the list */}
+                          {p.failure && !failuresOf(n).includes(p.failure) && <option value={p.failure}>{p.failure}</option>}
+                          {failuresOf(n).map(f => <option key={f} value={f}>{f}</option>)}
+                        </select>
+                      ) : (
+                        <input value={p.failure || ""} maxLength={120} placeholder="Failure type"
+                               onChange={e => setPart(n, "failure", e.target.value)} />
+                      )}
                       <input value={p.note || ""} maxLength={200} placeholder="Note (optional)"
                              onChange={e => setPart(n, "note", e.target.value)} />
                     </div>
@@ -332,11 +338,8 @@ export function DefectiveReviewModal({ record, device, session, config, mode = "
                 <div className="grid-3">
                   <input value={p.part || ""} maxLength={120} placeholder="Other part"
                          onChange={e => setOtherParts(o => o.map((x, j) => j === i ? { ...x, part: e.target.value } : x))} />
-                  <select value={p.failure || ""}
-                          onChange={e => setOtherParts(o => o.map((x, j) => j === i ? { ...x, failure: e.target.value } : x))}>
-                    <option value="">Failure type…</option>
-                    {failureNames.map(f => <option key={f} value={f}>{f}</option>)}
-                  </select>
+                  <input value={p.failure || ""} maxLength={120} placeholder="Failure type"
+                         onChange={e => setOtherParts(o => o.map((x, j) => j === i ? { ...x, failure: e.target.value } : x))} />
                   <div style={{ display: "flex", gap: 6 }}>
                     <input value={p.note || ""} maxLength={200} placeholder="Note (optional)"
                            onChange={e => setOtherParts(o => o.map((x, j) => j === i ? { ...x, note: e.target.value } : x))} />
@@ -390,86 +393,155 @@ export function DefectiveReviewModal({ record, device, session, config, mode = "
   );
 }
 
-// ── Admin: fault lists ─────────────────────────────────────────────────
-export function FaultListsModal({ config, deviceTypes = [], onChanged, onClose }) {
-  const [tab, setTab] = useState("part");
-  const [type, setType] = useState(deviceTypes[0] || "");
-  const [scope, setScope] = useState("common");           // failures: common | <deviceType>
-  const [name, setName] = useState("");
+// ── Admin: faulty parts, their failure types, recommendations ──────────
+function ItemRow({ name, sub, first, last, onUp, onDown, onRename, onDelete, onToggle, open, children }) {
+  return (
+    <div style={{ background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: 8 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 9px" }}>
+        {onToggle ? (
+          <button className="btn-ghost btn-sm" onClick={onToggle} title={open ? "Hide failure types" : "Show failure types"}
+                  style={{ flex: 1, justifyContent: "flex-start", border: "none", background: "transparent", padding: "4px 2px", minWidth: 0 }}>
+            <span style={{ display: "inline-block", width: 12, transform: open ? "rotate(90deg)" : "none", transition: "transform .15s" }}>▸</span>
+            <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text)", textAlign: "left", overflow: "hidden", textOverflow: "ellipsis" }}>{name}</span>
+            {sub && <span className="count-dot">{sub}</span>}
+          </button>
+        ) : (
+          <span style={{ flex: 1, fontSize: 13, minWidth: 0 }}>{name}</span>
+        )}
+        <button className="btn-ghost btn-sm" disabled={first} style={{ opacity: first ? .3 : 1 }} onClick={onUp} title="Move up">↑</button>
+        <button className="btn-ghost btn-sm" disabled={last} style={{ opacity: last ? .3 : 1 }} onClick={onDown} title="Move down">↓</button>
+        <button className="btn-ghost btn-sm" onClick={onRename} title="Rename"><Ic d={D.pencil} size={11} /></button>
+        <button className="btn-danger btn-sm" onClick={onDelete} title="Delete"><Ic d={D.trash} size={11} /></button>
+      </div>
+      {open && children}
+    </div>
+  );
+}
+
+function AddBox({ placeholder, onAdd }) {
+  const [v, setV] = useState("");
+  const go = async () => { if (!v.trim()) return; if (await onAdd(v.trim())) setV(""); };
+  return (
+    <div style={{ display: "flex", gap: 8 }}>
+      <input value={v} maxLength={120} placeholder={placeholder}
+             onKeyDown={e => { if (e.key === "Enter") go(); }} onChange={e => setV(e.target.value)} />
+      <button className="btn-primary btn-sm" disabled={!v.trim()} onClick={go}>
+        <Ic d={D.plus} size={12} stroke="#fff" /> Add
+      </button>
+    </div>
+  );
+}
+
+export function FaultyPartsModal({ config, deviceTypes = [], onChanged, onClose }) {
+  const types = [...new Set([...deviceTypes, ...Object.keys(config?.parts || {})])].filter(Boolean);
+  const [tab, setTab] = useState("parts");
+  const [type, setType] = useState(types[0] || "");
+  const [open, setOpen] = useState({});                 // part id → expanded
   const [err, setErr] = useState("");
-
-  const items =
-    tab === "part" ? (config?.parts?.[type] || []) :
-    tab === "failure" ? (scope === "common" ? (config?.failures?.common || []) : (config?.failures?.byType?.[scope] || [])) :
-    (config?.recommendations || []);
-
-  const typeFor = tab === "part" ? type : tab === "failure" && scope !== "common" ? scope : null;
 
   const run = async (fn) => {
     setErr("");
-    try { await fn(); await onChanged(); } catch (e) { setErr(friendlyError(e)); }
+    try { await fn(); await onChanged(); return true; }
+    catch (e) { setErr(friendlyError(e)); return false; }
+  };
+  const move = (list, i, dir) => run(() => api.reorderHccOptions(
+    list.map(x => x.id).map((id, k, a) => k === i ? a[i + dir] : k === i + dir ? a[i] : id)));
+  const rename = (it) => {
+    const n = window.prompt("Rename", it.name);
+    if (n && n.trim() && n.trim() !== it.name) run(() => api.renameHccOption(it.id, n));
+  };
+  const remove = (it, extra = "") => {
+    if (window.confirm(`Delete "${it.name}"?${extra} Reports already issued keep their text.`)) run(() => api.deleteHccOption(it.id));
   };
 
+  const parts = config?.parts?.[type] || [];
+  const recs = config?.recommendations || [];
+
   return (
-    <Modal title="Fault Lists" onClose={onClose} wide
+    <Modal title="Faulty Parts" onClose={onClose} wide
       footer={<button className="btn-primary" onClick={onClose}>Done</button>}>
       <div className="tab-bar" style={{ marginBottom: 14 }}>
-        {[["part", "Parts"], ["failure", "Failure types"], ["recommendation", "Recommendations"]].map(([k, l]) => (
-          <button key={k} className={"tab-btn" + (tab === k ? " active" : "")} onClick={() => { setTab(k); setErr(""); }}>{l}</button>
-        ))}
-      </div>
-
-      {tab === "part" && (
-        <div className="field"><label>Device type</label>
-          <select value={type} onChange={e => setType(e.target.value)}>
-            {deviceTypes.map(t => <option key={t} value={t}>{t}</option>)}
-          </select></div>
-      )}
-      {tab === "failure" && (
-        <div className="field"><label>List</label>
-          <select value={scope} onChange={e => setScope(e.target.value)}>
-            <option value="common">Common — every device type</option>
-            {deviceTypes.map(t => <option key={t} value={t}>Only {t}</option>)}
-          </select></div>
-      )}
-      {tab === "failure" && scope !== "common" && (
-        <p style={{ fontSize: 12, color: "var(--text3)", marginTop: -6 }}>
-          These are offered for {scope} in addition to the common list.
-        </p>
-      )}
-
-      {err && <div className="alert alert-error"><Ic d={D.close} size={13} />{err}</div>}
-
-      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-        <input value={name} maxLength={120} placeholder="New item"
-               onKeyDown={e => { if (e.key === "Enter" && name.trim()) run(async () => { await api.addHccOption(tab, typeFor, name); setName(""); }); }}
-               onChange={e => setName(e.target.value)} />
-        <button className="btn-primary btn-sm" disabled={!name.trim() || (tab === "part" && !type)}
-                onClick={() => run(async () => { await api.addHccOption(tab, typeFor, name); setName(""); })}>
-          <Ic d={D.plus} size={12} stroke="#fff" /> Add
+        <button className={"tab-btn" + (tab === "parts" ? " active" : "")} onClick={() => { setTab("parts"); setErr(""); }}>
+          <Ic d={D.wrench} size={13} /> Parts &amp; failure types
+        </button>
+        <button className={"tab-btn" + (tab === "recs" ? " active" : "")} onClick={() => { setTab("recs"); setErr(""); }}>
+          <Ic d={D.list} size={13} /> Recommendations
         </button>
       </div>
 
-      {items.length === 0 && <Empty label="The list is empty" />}
-      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-        {items.map(it => (
-          <div key={it.id} style={{
-            display: "flex", alignItems: "center", gap: 8, background: "var(--surface2)",
-            border: "1px solid var(--border)", borderRadius: 7, padding: "7px 10px",
-          }}>
-            <span style={{ flex: 1, fontSize: 13 }}>{it.name}</span>
-            <button className="btn-ghost btn-sm" onClick={() => {
-              const n = window.prompt("Rename", it.name);
-              if (n && n.trim() && n.trim() !== it.name) run(() => api.renameHccOption(it.id, n));
-            }}><Ic d={D.pencil} size={11} /></button>
-            <button className="btn-danger btn-sm" onClick={() => {
-              if (window.confirm(`Remove "${it.name}"? Reports already issued keep their text.`)) run(() => api.deleteHccOption(it.id));
-            }}><Ic d={D.trash} size={11} /></button>
+      {config?.needsUpgrade && (
+        <div className="alert alert-warn"><Ic d={D.warn} size={13} />
+          Run schema_hcc_v3.sql in the database first — failure types are not linked to parts yet.</div>
+      )}
+      {err && <div className="alert alert-error"><Ic d={D.close} size={13} />{err}</div>}
+
+      {tab === "parts" && (<>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 14 }}>
+          {types.map(t => (
+            <button key={t} className={"btn-sm " + (t === type ? "btn-primary" : "btn-ghost")} onClick={() => { setType(t); setOpen({}); }}>
+              {t} <span style={{ opacity: .75, marginLeft: 4 }}>({(config?.parts?.[t] || []).length})</span>
+            </button>
+          ))}
+        </div>
+        {!type && <Empty label="Add HCC device types in Lists first" />}
+        {type && (<>
+          <div style={{ marginBottom: 12 }}>
+            <AddBox placeholder={`New part for ${type}`} onAdd={n => run(() => api.addHccOption("part", type, n))} />
           </div>
-        ))}
-      </div>
+          {parts.length === 0 && <Empty label={`No parts for ${type} yet`} />}
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {parts.map((p, i) => (
+              <ItemRow key={p.id} name={p.name} sub={String(p.failures.length)}
+                       first={i === 0} last={i === parts.length - 1}
+                       onUp={() => move(parts, i, -1)} onDown={() => move(parts, i, 1)}
+                       onRename={() => rename(p)} onDelete={() => remove(p, " Its failure types are deleted too.")}
+                       open={!!open[p.id]} onToggle={() => setOpen(o => ({ ...o, [p.id]: !o[p.id] }))}>
+                <div style={{ borderTop: "1px solid var(--border)", padding: "10px 10px 10px 26px", display: "flex", flexDirection: "column", gap: 6 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: ".05em" }}>
+                    Failure types — {p.name}
+                  </div>
+                  {p.failures.length === 0 && (
+                    <div style={{ fontSize: 12, color: "var(--text3)" }}>None yet — the failure is typed by hand in the report.</div>
+                  )}
+                  {p.failures.map((f, j) => (
+                    <ItemRow key={f.id} name={f.name} first={j === 0} last={j === p.failures.length - 1}
+                             onUp={() => move(p.failures, j, -1)} onDown={() => move(p.failures, j, 1)}
+                             onRename={() => rename(f)} onDelete={() => remove(f)} />
+                  ))}
+                  <AddBox placeholder="New failure type" onAdd={n => run(() => api.addHccOption("failure", null, n, p.id))} />
+                </div>
+              </ItemRow>
+            ))}
+          </div>
+        </>)}
+      </>)}
+
+      {tab === "recs" && (<>
+        <div style={{ marginBottom: 12 }}>
+          <AddBox placeholder="New recommendation" onAdd={n => run(() => api.addHccOption("recommendation", null, n))} />
+        </div>
+        {recs.length === 0 && <Empty label="The list is empty" />}
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {recs.map((r, i) => (
+            <ItemRow key={r.id} name={r.name} first={i === 0} last={i === recs.length - 1}
+                     onUp={() => move(recs, i, -1)} onDown={() => move(recs, i, 1)}
+                     onRename={() => rename(r)} onDelete={() => remove(r)} />
+          ))}
+        </div>
+      </>)}
     </Modal>
   );
+}
+
+/** Stand-alone version for the header button (loads its own lists). */
+export function FaultyPartsAdmin({ deviceTypes, onClose }) {
+  const { config, reload } = useHccConfig();
+  if (config?.missing) return (
+    <Modal title="Faulty Parts" onClose={onClose} footer={<button className="btn-primary" onClick={onClose}>Close</button>}>
+      <div className="alert alert-warn"><Ic d={D.warn} size={13} /> Run schema_hcc_v2.sql and schema_hcc_v3.sql in the database first.</div>
+    </Modal>
+  );
+  return <FaultyPartsModal config={config} deviceTypes={deviceTypes} onChanged={reload} onClose={onClose} />;
 }
 
 // ── Admin: report template ─────────────────────────────────────────────
@@ -579,7 +651,7 @@ export default function DefectiveSection({ records, stageOf, session, config, re
         {isAdmin && (
           <div style={{ display: "flex", gap: 8 }}>
             <button className="btn-ghost btn-sm" onClick={() => setLists(true)} disabled={!config || config.missing}>
-              <Ic d={D.list} size={13} /> Fault Lists
+              <Ic d={D.wrench} size={13} /> Faulty Parts
             </button>
             <button className="btn-ghost btn-sm" onClick={() => setTpl(true)} disabled={!config || config.missing}>
               <Ic d={D.text} size={13} /> Report Template
@@ -641,7 +713,7 @@ export default function DefectiveSection({ records, stageOf, session, config, re
                               onSave={(patch) => updateDevice(review.record.id, review.device.id, patch)}
                               onClose={() => setReview(null)} />
       )}
-      {lists && <FaultListsModal config={config} deviceTypes={deviceTypes} onChanged={reloadConfig} onClose={() => setLists(false)} />}
+      {lists && <FaultyPartsModal config={config} deviceTypes={deviceTypes} onChanged={reloadConfig} onClose={() => setLists(false)} />}
       {tpl && <TemplateModal config={config} session={session} onSaved={reloadConfig} onClose={() => setTpl(false)} />}
     </div>
   );

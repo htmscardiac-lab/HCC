@@ -241,6 +241,7 @@ export async function loadUsers() {
     name: p.full_name,
     role: p.role,
     isActive: p.is_active,
+    createdAt: p.created_at,
   }));
 }
 
@@ -761,22 +762,31 @@ export async function loadHccConfig() {
     supabase.from("hcc_report_template").select("*").eq("id", 1).maybeSingle(),
   ]);
   if (o.error) { if (missingTable(o.error)) return { missing: true }; throw o.error; }
-  const parts = {}, byType = {}, common = [], recommendations = [];
-  (o.data || []).forEach(r => {
-    const item = { id: r.id, name: r.name };
-    if (r.kind === "part") (parts[r.device_type] ||= []).push(item);
-    else if (r.kind === "failure") (r.device_type ? (byType[r.device_type] ||= []) : common).push(item);
-    else if (r.kind === "recommendation") recommendations.push(item);
+  // device type → parts → each part's failure types
+  const parts = {}, byId = {}, recommendations = [];
+  const rows = o.data || [];
+  rows.forEach(r => {
+    if (r.kind === "part") {
+      const item = { id: r.id, name: r.name, failures: [] };
+      byId[r.id] = item;
+      (parts[r.device_type] ||= []).push(item);
+    } else if (r.kind === "recommendation") recommendations.push({ id: r.id, name: r.name });
+  });
+  rows.forEach(r => {
+    if (r.kind === "failure" && byId[r.part_id]) byId[r.part_id].failures.push({ id: r.id, name: r.name });
   });
   return {
-    parts, failures: { common, byType }, recommendations,
+    parts, recommendations,
+    // schema_hcc_v3.sql not run yet: rows have no part_id column
+    needsUpgrade: rows.length > 0 && !("part_id" in rows[0]),
     template: t.error ? null : (t.data?.data || null),
   };
 }
 
-export async function addHccOption(kind, deviceType, name) {
+/** kind: part (needs deviceType) | failure (needs partId) | recommendation */
+export async function addHccOption(kind, deviceType, name, partId = null) {
   const { error } = await supabase.from("hcc_options").insert({
-    kind, device_type: deviceType || null, name: String(name).trim(), sort_order: 999,
+    kind, device_type: deviceType || null, part_id: partId, name: String(name).trim(), sort_order: 999,
   });
   if (error) {
     if (/duplicate|unique/i.test(error.message || "")) throw new Error("That item is already in the list.");
@@ -787,6 +797,14 @@ export async function addHccOption(kind, deviceType, name) {
 export async function renameHccOption(id, name) {
   const { error } = await supabase.from("hcc_options").update({ name: String(name).trim() }).eq("id", id);
   if (error) throw error;
+}
+
+/** Save a new order: ids in the order they should appear. */
+export async function reorderHccOptions(ids) {
+  const res = await Promise.all(ids.map((id, i) =>
+    supabase.from("hcc_options").update({ sort_order: i + 1 }).eq("id", id)));
+  const bad = res.find(r => r.error);
+  if (bad) throw bad.error;
 }
 
 export async function deleteHccOption(id) {

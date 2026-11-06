@@ -37,7 +37,7 @@ const MODULES = [
 ];
 
 export default function Launcher({ session, onPick, onLogout, stats,
-                                   onUsers, onBuilder, onLists, onVault, vaultOff = false, pendingCount = 0 }) {
+                                   onUsers, onBuilder, onLists, onFaults, onVault, vaultOff = false, pendingCount = 0 }) {
   const modules = MODULES.filter(m => !m.adminOnly || session.role === "admin");
   const isAdmin = session.role === "admin";
   return (
@@ -71,6 +71,10 @@ export default function Launcher({ session, onPick, onLogout, stats,
               <button onClick={onLists} title="Manage dropdown lists" style={hBtn}>
                 <Ic d={D.chip} size={14} stroke="#fff" />
                 <span style={{ fontSize: 12 }}>Lists</span>
+              </button>
+              <button onClick={onFaults} title="Faulty parts and failure types (HCC)" style={hBtn}>
+                <Ic d={D.wrench} size={14} stroke="#fff" />
+                <span style={{ fontSize: 12 }}>Faulty Parts</span>
               </button>
               <button onClick={onVault} title="Patient-data encryption" style={hBtn}>
                 <Ic d={D.key} size={14} stroke={vaultOff ? "var(--gold-mid)" : "#fff"} />
