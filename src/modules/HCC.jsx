@@ -11,6 +11,12 @@ import RosterSection, { useRoster, OnDutyStrip } from "../components/Roster.jsx"
 const OVERDUE_H = 2;           // In Process: warn after two hours
 const OUTGOING_OVERDUE_H = 24; // Outgoing: warn after one day
 
+/** Keep digits only; Arabic-Indic digits typed on some keyboards become 0-9. */
+const digitsOnly = (v) => String(v || "")
+  .replace(/[\u0660-\u0669]/g, d => String(d.charCodeAt(0) - 0x0660))
+  .replace(/[\u06F0-\u06F9]/g, d => String(d.charCodeAt(0) - 0x06F0))
+  .replace(/\D/g, "");
+
 /**
  * HCC v2 — every device has its own stage, but a patient's devices always
  * stay together under ONE record:
@@ -172,7 +178,7 @@ function EditRecordModal({ record, deviceTypes = [], onSave, onClose }) {
       <SL>Patient Information</SL>
       <div className="grid-3" style={{ marginTop: 12 }}>
         <div className="field"><label>MRN *</label>
-          <input value={mrn} maxLength={50} onChange={e => setMrn(e.target.value)} /></div>
+          <input value={mrn} maxLength={50} inputMode="numeric" pattern="[0-9]*" autoComplete="off" onChange={e => setMrn(digitsOnly(e.target.value))} /></div>
         <div className="field"><label>Patient Name *</label>
           <input value={name} maxLength={150} onChange={e => setName(e.target.value)} /></div>
         <div className="field"><label>Patient Type *</label>
@@ -187,7 +193,7 @@ function EditRecordModal({ record, deviceTypes = [], onSave, onClose }) {
             <input value={ward} onChange={e => setWard(e.target.value)} placeholder="W-3A" /></div>
         )}
         <div className="field"><label>Phone / Extension *</label>
-          <input value={phone} maxLength={40} onChange={e => setPhone(e.target.value)} /></div>
+          <input value={phone} maxLength={40} inputMode="numeric" pattern="[0-9]*" autoComplete="off" onChange={e => setPhone(digitsOnly(e.target.value))} /></div>
       </div>
 
       <div style={{ borderTop: "1px solid var(--border)", margin: "8px 0 16px" }} />
@@ -513,7 +519,7 @@ function IncomingSection({ setRecords, session, deviceTypes }) {
         <SL>Patient Information</SL>
         <div className="grid-3" style={{ marginTop: 12 }}>
           <div className="field"><label>MRN *</label>
-            <input value={mrn} maxLength={50} onChange={e => setMrn(e.target.value)} placeholder="MRN-12345" /></div>
+            <input value={mrn} maxLength={50} inputMode="numeric" pattern="[0-9]*" autoComplete="off" onChange={e => setMrn(digitsOnly(e.target.value))} placeholder="123456" /></div>
           <div className="field"><label>Patient Name *</label>
             <input value={name} maxLength={150} onChange={e => setName(e.target.value)} placeholder="Full name" /></div>
           <div className="field"><label>Patient Type *</label>
@@ -528,7 +534,7 @@ function IncomingSection({ setRecords, session, deviceTypes }) {
               <input value={ward} onChange={e => setWard(e.target.value)} placeholder="W-3A" /></div>
           )}
           <div className="field"><label>Phone / Extension *</label>
-            <input value={phone} maxLength={40} onChange={e => setPhone(e.target.value)} placeholder="05xxxxxxxx" /></div>
+            <input value={phone} maxLength={40} inputMode="numeric" pattern="[0-9]*" autoComplete="off" onChange={e => setPhone(digitsOnly(e.target.value))} placeholder="05xxxxxxxx" /></div>
           <div className="field"><label>Entry Date & Time *</label>
             <input type="datetime-local" value={edate} step="1"
                    onChange={e => { setEdate(e.target.value); edateManualRef.current = true; }} /></div>
